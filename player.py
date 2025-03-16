@@ -708,6 +708,78 @@ class VideoTextPlayer:
     
     def save_to_csv(self, frame_number, timestamp, results):
         """Save the extracted text to a CSV file"""
+        # Check if we have all three values
+        has_credits = self.SelectionType.CREDITS in results
+        has_bet = self.SelectionType.BET in results
+        has_win = self.SelectionType.WIN in results
+        
+        # Skip if we don't have all three values
+        if not (has_credits and has_bet and has_win):
+            print(f"Skipping frame {frame_number} - missing values: Credits={has_credits}, Bet={has_bet}, Win={has_win}")
+            return
+            
+        # Validate credit changes
+        valid_entry = True
+        try:
+            current_credits = float(results[self.SelectionType.CREDITS])
+            current_bet = float(results[self.SelectionType.BET])
+            current_win = float(results[self.SelectionType.WIN])
+            
+            # Get previous values from CSV if it exists
+            previous_credits = None
+            previous_bet = None
+            previous_win = None
+            
+            if os.path.exists(self.csv_file):
+                try:
+                    df = pd.read_csv(self.csv_file)
+                    if not df.empty:
+                        last_row = df.iloc[-1]
+                        if 'Credits' in last_row and not pd.isna(last_row['Credits']):
+                            previous_credits = float(last_row['Credits'])
+                        if 'Bet' in last_row and not pd.isna(last_row['Bet']):
+                            previous_bet = float(last_row['Bet'])
+                        if 'Win' in last_row and not pd.isna(last_row['Win']):
+                            previous_win = float(last_row['Win'])
+                except Exception as e:
+                    print(f"Error reading previous values: {e}")
+            
+            # Validate credit changes if we have previous values
+            if previous_credits is not None and previous_bet is not None and previous_win is not None:
+                # Calculate expected credit change
+                expected_decrease = previous_bet
+                expected_increase = previous_win
+                
+                # Calculate actual change
+                actual_change = current_credits - previous_credits
+                
+                # If credits decreased by more than the previous bet, it's likely an error
+                if actual_change < 0 and abs(actual_change) > expected_decrease * 1.1:  # Allow 10% margin for rounding
+                    print(f"Invalid credit decrease: {actual_change} is more than previous bet {expected_decrease}")
+                    valid_entry = False
+                
+                # Credits can increase by any amount (could be a win or deposit)
+                # But we still filter out values over 50000 in clean_numeric_text
+        except Exception as e:
+            print(f"Error validating credit changes: {e}")
+        
+        # Skip if the entry is invalid
+        if not valid_entry:
+            print(f"Skipping invalid entry at frame {frame_number}")
+            return
+        
+        # Additional validation using our dedicated function
+        try:
+            current_credits = float(results[self.SelectionType.CREDITS])
+            current_bet = float(results[self.SelectionType.BET])
+            current_win = float(results[self.SelectionType.WIN])
+            
+            if not self.validate_credit_changes(current_credits, current_bet, current_win):
+                print(f"Credit validation failed for frame {frame_number}")
+                return
+        except Exception as e:
+            print(f"Error in additional validation: {e}")
+        
         # Prepare the data row
         row = {
             'Frame': int(frame_number),
@@ -792,6 +864,48 @@ class VideoTextPlayer:
         except Exception as e:
             self.status_bar.config(text=f"Error updating graph: {str(e)}")
             print(f"Error updating graph: {str(e)}")
+    
+    def validate_credit_changes(self, current_credits, current_bet, current_win):
+        """Validate that credit changes follow expected patterns"""
+        # Get previous values from CSV if it exists
+        previous_credits = None
+        previous_bet = None
+        previous_win = None
+        
+        if os.path.exists(self.csv_file):
+            try:
+                df = pd.read_csv(self.csv_file)
+                if not df.empty:
+                    last_row = df.iloc[-1]
+                    if 'Credits' in last_row and not pd.isna(last_row['Credits']):
+                        previous_credits = float(last_row['Credits'])
+                    if 'Bet' in last_row and not pd.isna(last_row['Bet']):
+                        previous_bet = float(last_row['Bet'])
+                    if 'Win' in last_row and not pd.isna(last_row['Win']):
+                        previous_win = float(last_row['Win'])
+            except Exception as e:
+                print(f"Error reading previous values: {e}")
+                return True  # If we can't validate, assume it's valid
+        
+        # If we don't have previous values, we can't validate
+        if previous_credits is None or previous_bet is None or previous_win is None:
+            return True
+        
+        # Calculate expected credit change
+        expected_decrease = previous_bet
+        expected_increase = previous_win
+        
+        # Calculate actual change
+        actual_change = current_credits - previous_credits
+        
+        # If credits decreased by more than the previous bet, it's likely an error
+        if actual_change < 0 and abs(actual_change) > expected_decrease * 1.1:  # Allow 10% margin for rounding
+            print(f"Invalid credit decrease: {actual_change} is more than previous bet {expected_decrease}")
+            return False
+        
+        # Credits can increase by any amount (could be a win or deposit)
+        # But we still filter out values over 50000 in clean_numeric_text
+        return True
     
     def update_current_values(self, results):
         """Update the current values display"""
