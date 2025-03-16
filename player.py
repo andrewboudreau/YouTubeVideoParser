@@ -568,8 +568,14 @@ class VideoTextPlayer:
         
         # Try to convert to float to validate it's a number
         try:
-            float(result)
-            return result
+            value = float(result)
+            # Cap minimum value at 0
+            if value < 0:
+                value = 0
+            # Ignore values over 50000
+            if value > 50000:
+                return ""
+            return str(value)
         except ValueError:
             # If it's not a valid number, return empty string
             return ""
