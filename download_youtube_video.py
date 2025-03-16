@@ -5,9 +5,8 @@ import datetime
 import re
 import platform
 import argparse
-from getpass import getpass
 
-def list_formats(video_url, username=None, password=None):
+def list_formats(video_url, cookies_file=None):
     """List all available formats for the video"""
     try:
         print(f"Fetching available formats for: {video_url}")
@@ -18,11 +17,9 @@ def list_formats(video_url, username=None, password=None):
             "-F",  # Capital F to list all formats
         ]
         
-        # Add authentication if provided
-        if username and password:
-            command.extend(["--username", username, "--password", password])
-        elif username:
-            command.extend(["--username", username])
+        # Add cookies if provided
+        if cookies_file:
+            command.extend(["--cookies", cookies_file])
             
         command.append(video_url)
         
@@ -44,7 +41,7 @@ def list_formats(video_url, username=None, password=None):
         print(f"An error occurred: {str(e)}")
         return False
 
-def download_with_ytdlp(video_url, format_code=None, username=None, password=None):
+def download_with_ytdlp(video_url, format_code=None, cookies_file=None):
     try:
         # Check if yt-dlp is installed
         try:
@@ -80,12 +77,9 @@ def download_with_ytdlp(video_url, format_code=None, username=None, password=Non
             "--no-mtime",             # Don't use the media file's modification time
         ]
         
-        # Add authentication if provided
-        if username and password:
-            command.extend(["--username", username, "--password", password])
-        elif username:
-            command.extend(["--username", username])
-            # Password will be prompted by yt-dlp if needed
+        # Add cookies if provided
+        if cookies_file:
+            command.extend(["--cookies", cookies_file])
         
         # Add format code if specified
         if format_code:
@@ -131,13 +125,11 @@ def download_with_ytdlp(video_url, format_code=None, username=None, password=Non
 
 def main():
     # Set up argument parser
-    parser = argparse.ArgumentParser(description='Download YouTube videos with authentication support')
+    parser = argparse.ArgumentParser(description='Download YouTube videos with cookies authentication support')
     parser.add_argument('url', help='YouTube video URL')
     parser.add_argument('--list', action='store_true', help='List available formats')
     parser.add_argument('--format', '-f', help='Format code to download')
-    parser.add_argument('--username', '-u', help='YouTube username or email')
-    parser.add_argument('--password', '-p', help='YouTube password (omit for secure prompt)')
-    parser.add_argument('--use-env', action='store_true', help='Use YT_USERNAME and YT_PASSWORD environment variables')
+    parser.add_argument('--cookies', '-c', help='Path to cookies file for authentication')
     
     args = parser.parse_args()
     
@@ -146,32 +138,18 @@ def main():
         print("Error: Invalid YouTube URL")
         sys.exit(1)
     
-    # Get credentials from environment variables if requested
-    username = None
-    password = None
-    
-    if args.use_env:
-        username = os.environ.get('YT_USERNAME')
-        password = os.environ.get('YT_PASSWORD')
-        if not username:
-            print("Warning: YT_USERNAME environment variable not set")
-    elif args.username:
-        username = args.username
-        if args.password:
-            password = args.password
-        else:
-            # Securely prompt for password if not provided
-            password = getpass("Enter YouTube password: ")
+    # Get cookies file path
+    cookies_file = args.cookies
     
     # Check if we should list formats
     if args.list:
-        list_formats(args.url, username, password)
+        list_formats(args.url, cookies_file)
         print("\nTo download a specific format, run:")
-        print(f"python download_youtube_video.py {args.url} --format <format_code>")
+        print(f"python download_youtube_video.py {args.url} --format <format_code> --cookies <cookies_file>")
         return
     
     # Download the video
-    download_with_ytdlp(args.url, args.format, username, password)
+    download_with_ytdlp(args.url, args.format, cookies_file)
 
 if __name__ == "__main__":
     main()
