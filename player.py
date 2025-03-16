@@ -114,14 +114,14 @@ class VideoTextPlayer:
         self.credits_label = tk.Label(values_frame, text="Credits: N/A", 
                                      bg="#333333", fg="white", font=("Arial", 10, "bold"))
         self.credits_label.pack(side=tk.LEFT, padx=10)
-        
-        self.win_label = tk.Label(values_frame, text="Win: N/A", 
-                                 bg="#333333", fg="white", font=("Arial", 10, "bold"))
-        self.win_label.pack(side=tk.LEFT, padx=10)
-        
+                
         self.bet_label = tk.Label(values_frame, text="Bet: N/A", 
                                  bg="#333333", fg="white", font=("Arial", 10, "bold"))
         self.bet_label.pack(side=tk.LEFT, padx=10)
+
+        self.win_label = tk.Label(values_frame, text="Win: N/A", 
+                                 bg="#333333", fg="white", font=("Arial", 10, "bold"))
+        self.win_label.pack(side=tk.LEFT, padx=10)
         
         # Bind mouse events for selection rectangle
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
