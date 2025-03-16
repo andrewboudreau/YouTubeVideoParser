@@ -51,19 +51,16 @@ class VideoTextPlayer:
         # Selection rectangle variables
         self.current_selection_type = None
         self.selection_areas = {
-            SelectionType.CREDITS: {"active": False, "rect": None, "handle": None, 
+            SelectionType.CREDITS: {"active": False, "rect": None, 
                                    "start_x": 0, "start_y": 0, "current_x": 0, "current_y": 0,
                                    "color": "red", "label": "Credits"},
-            SelectionType.WIN: {"active": False, "rect": None, "handle": None, 
+            SelectionType.WIN: {"active": False, "rect": None, 
                                "start_x": 0, "start_y": 0, "current_x": 0, "current_y": 0,
                                "color": "green", "label": "Win"},
-            SelectionType.BET: {"active": False, "rect": None, "handle": None, 
+            SelectionType.BET: {"active": False, "rect": None, 
                                "start_x": 0, "start_y": 0, "current_x": 0, "current_y": 0,
                                "color": "blue", "label": "Bet"}
         }
-        
-        self.resize_active = False
-        self.handle_size = 10
         self.current_frame_image = None
         self.scale_factor_x = 1.0
         self.scale_factor_y = 1.0
@@ -508,36 +505,9 @@ class VideoTextPlayer:
         if not self.cap or not self.current_selection_type:
             return
             
-        sel_data = self.selection_areas[self.current_selection_type]
+        # Clear existing selection of current type and create a new one
+        self.clear_selection(self.current_selection_type)
         
-        # Check if clicking on resize handle of current selection type
-        if sel_data["active"] and sel_data["handle"]:
-            handle_coords = self.canvas.coords(sel_data["handle"])
-            if (abs(event.x - handle_coords[0]) <= self.handle_size and 
-                abs(event.y - handle_coords[1]) <= self.handle_size):
-                self.resize_active = True
-                return
-        
-        # Check if clicking inside any existing selection rectangle to move it
-        for sel_type, data in self.selection_areas.items():
-            if data["active"] and data["rect"]:
-                coords = self.canvas.coords(data["rect"])
-                if (coords[0] <= event.x <= coords[2] and 
-                    coords[1] <= event.y <= coords[3]):
-                    # Switch to this selection type
-                    self.current_selection_type = sel_type
-                    self.selection_var.set(sel_type.name)
-                    
-                    # Calculate offset for moving
-                    sel_data = self.selection_areas[sel_type]
-                    sel_data["start_x"] = sel_data["start_x"] - (event.x - coords[0])
-                    sel_data["start_y"] = sel_data["start_y"] - (event.y - coords[1])
-                    sel_data["current_x"] = sel_data["current_x"] - (event.x - coords[0])
-                    sel_data["current_y"] = sel_data["current_y"] - (event.y - coords[1])
-                    
-                    self.resize_active = False
-                    return
-                
         # Start a new selection for current type
         sel_data = self.selection_areas[self.current_selection_type]
         sel_data["active"] = True
@@ -555,36 +525,26 @@ class VideoTextPlayer:
         if not sel_data["active"]:
             return
             
-        if self.resize_active:
-            # Resizing the selection
-            sel_data["current_x"] = max(0, min(event.x, self.canvas.winfo_width()))
-            sel_data["current_y"] = max(0, min(event.y, self.canvas.winfo_height()))
-        else:
-            # Creating/moving the selection
-            sel_data["current_x"] = event.x
-            sel_data["current_y"] = event.y
+        # Update the current position for drawing
+        sel_data["current_x"] = max(0, min(event.x, self.canvas.winfo_width()))
+        sel_data["current_y"] = max(0, min(event.y, self.canvas.winfo_height()))
             
         self.draw_selection_rectangle(self.current_selection_type)
     
     def on_mouse_up(self, event):
-        self.resize_active = False
         if not self.current_selection_type:
             return
             
         sel_data = self.selection_areas[self.current_selection_type]
         # Ensure the rectangle has some minimum size
         if abs(sel_data["current_x"] - sel_data["start_x"]) < 10 or abs(sel_data["current_y"] - sel_data["start_y"]) < 10:
-            if not self.resize_active:  # Only clear if not resizing
-                self.clear_selection(self.current_selection_type)
+            self.clear_selection(self.current_selection_type)
     
     def draw_selection_rectangle(self, selection_type):
         sel_data = self.selection_areas[selection_type]
         
-        # Delete existing rectangle
-        if sel_data["rect"]:
-            self.canvas.delete(sel_data["rect"])
-        if sel_data["handle"]:
-            self.canvas.delete(sel_data["handle"])
+        # Delete existing rectangle and all associated elements
+        self.canvas.delete(f"selection_{selection_type.name}")
             
         # Draw new rectangle
         x1 = min(sel_data["start_x"], sel_data["current_x"])
@@ -592,38 +552,32 @@ class VideoTextPlayer:
         x2 = max(sel_data["start_x"], sel_data["current_x"])
         y2 = max(sel_data["start_y"], sel_data["current_y"])
         
+        # Create rectangle with a tag for easy deletion
         sel_data["rect"] = self.canvas.create_rectangle(
             x1, y1, x2, y2, 
             outline=sel_data["color"], 
             width=2,
-            dash=(5, 5)
+            dash=(5, 5),
+            tags=f"selection_{selection_type.name}"
         )
         
-        # Add label to the top-left corner
+        # Add label to the top-left corner with the same tag
         self.canvas.create_text(
             x1 + 5, y1 + 5,
             text=sel_data["label"],
             fill=sel_data["color"],
             anchor=tk.NW,
-            font=("Arial", 8, "bold")
-        )
-        
-        # Add resize handle at bottom-right corner
-        sel_data["handle"] = self.canvas.create_rectangle(
-            x2 - self.handle_size, y2 - self.handle_size,
-            x2 + self.handle_size, y2 + self.handle_size,
-            fill=sel_data["color"], outline="white"
+            font=("Arial", 8, "bold"),
+            tags=f"selection_{selection_type.name}"
         )
     
     def clear_selection(self, selection_type):
         sel_data = self.selection_areas[selection_type]
         sel_data["active"] = False
-        if sel_data["rect"]:
-            self.canvas.delete(sel_data["rect"])
-            sel_data["rect"] = None
-        if sel_data["handle"]:
-            self.canvas.delete(sel_data["handle"])
-            sel_data["handle"] = None
+        
+        # Delete all canvas elements with this selection's tag
+        self.canvas.delete(f"selection_{selection_type.name}")
+        sel_data["rect"] = None
         
         # Reset the displayed value for this selection type
         if selection_type == self.SelectionType.CREDITS:
