@@ -219,8 +219,8 @@ class VideoTextPlayer:
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         # Get fixed canvas dimensions - use the initial dimensions
-        canvas_width = 800
-        canvas_height = 450
+        canvas_width = 1280
+        canvas_height = 720
         
         # Resize frame to fit canvas while maintaining aspect ratio
         frame_h, frame_w = frame.shape[:2]
