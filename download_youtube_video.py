@@ -4,8 +4,10 @@ import subprocess
 import datetime
 import re
 import platform
+import argparse
+from getpass import getpass
 
-def list_formats(video_url):
+def list_formats(video_url, username=None, password=None):
     """List all available formats for the video"""
     try:
         print(f"Fetching available formats for: {video_url}")
@@ -14,8 +16,15 @@ def list_formats(video_url):
         command = [
             "yt-dlp", 
             "-F",  # Capital F to list all formats
-            video_url
         ]
+        
+        # Add authentication if provided
+        if username and password:
+            command.extend(["--username", username, "--password", password])
+        elif username:
+            command.extend(["--username", username])
+            
+        command.append(video_url)
         
         result = subprocess.run(command, 
                                shell=(platform.system() == "Windows"),
@@ -35,7 +44,7 @@ def list_formats(video_url):
         print(f"An error occurred: {str(e)}")
         return False
 
-def download_with_ytdlp(video_url, format_code=None):
+def download_with_ytdlp(video_url, format_code=None, username=None, password=None):
     try:
         # Check if yt-dlp is installed
         try:
@@ -70,6 +79,13 @@ def download_with_ytdlp(video_url, format_code=None):
             "--no-playlist",          # Don't download playlists
             "--no-mtime",             # Don't use the media file's modification time
         ]
+        
+        # Add authentication if provided
+        if username and password:
+            command.extend(["--username", username, "--password", password])
+        elif username:
+            command.extend(["--username", username])
+            # Password will be prompted by yt-dlp if needed
         
         # Add format code if specified
         if format_code:
@@ -114,36 +130,48 @@ def download_with_ytdlp(video_url, format_code=None):
         print(f"An error occurred: {str(e)}")
 
 def main():
-    # Check if URL is provided
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print("  List formats: python yt_dlp_downloader.py <YouTube URL> --list")
-        print("  Download specific format: python yt_dlp_downloader.py <YouTube URL> --format <format_code>")
-        print("  Download best quality: python yt_dlp_downloader.py <YouTube URL>")
-        sys.exit(1)
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Download YouTube videos with authentication support')
+    parser.add_argument('url', help='YouTube video URL')
+    parser.add_argument('--list', action='store_true', help='List available formats')
+    parser.add_argument('--format', '-f', help='Format code to download')
+    parser.add_argument('--username', '-u', help='YouTube username or email')
+    parser.add_argument('--password', '-p', help='YouTube password (omit for secure prompt)')
+    parser.add_argument('--use-env', action='store_true', help='Use YT_USERNAME and YT_PASSWORD environment variables')
     
-    # Get URL from command line argument
-    video_url = sys.argv[1]
+    args = parser.parse_args()
     
     # Check if the URL is valid
-    if not re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$', video_url):
+    if not re.match(r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$', args.url):
         print("Error: Invalid YouTube URL")
         sys.exit(1)
     
+    # Get credentials from environment variables if requested
+    username = None
+    password = None
+    
+    if args.use_env:
+        username = os.environ.get('YT_USERNAME')
+        password = os.environ.get('YT_PASSWORD')
+        if not username:
+            print("Warning: YT_USERNAME environment variable not set")
+    elif args.username:
+        username = args.username
+        if args.password:
+            password = args.password
+        else:
+            # Securely prompt for password if not provided
+            password = getpass("Enter YouTube password: ")
+    
     # Check if we should list formats
-    if len(sys.argv) >= 3 and sys.argv[2] == "--list":
-        list_formats(video_url)
+    if args.list:
+        list_formats(args.url, username, password)
         print("\nTo download a specific format, run:")
-        print(f"python yt_dlp_downloader.py {video_url} --format <format_code>")
+        print(f"python download_youtube_video.py {args.url} --format <format_code>")
         return
-        
-    # Check if a format was specified
-    format_code = None
-    if len(sys.argv) >= 4 and sys.argv[2] == "--format":
-        format_code = sys.argv[3]
-        
+    
     # Download the video
-    download_with_ytdlp(video_url, format_code)
+    download_with_ytdlp(args.url, args.format, username, password)
 
 if __name__ == "__main__":
     main()
