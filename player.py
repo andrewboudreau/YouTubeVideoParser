@@ -8,9 +8,13 @@ from datetime import timedelta
 import threading
 import time
 import csv
+import pandas as pd
 from enum import Enum, auto
 import queue
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 class VideoTextPlayer:
     def __init__(self, root):
@@ -105,8 +109,8 @@ class VideoTextPlayer:
         self.video_frame.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.BOTH, expand=True)
         
         # Canvas for video display
-        self.canvas = tk.Canvas(self.video_frame, bg="black", width=800, height=450)
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.video_canvas = tk.Canvas(self.video_frame, bg="black", width=800, height=450)
+        self.video_canvas.pack(fill=tk.BOTH, expand=True)
         
         # Current values display
         values_frame = tk.Frame(self.video_frame, bg="#333333", height=40)
@@ -126,18 +130,38 @@ class VideoTextPlayer:
         self.win_label.pack(side=tk.LEFT, padx=10)
         
         # Bind mouse events for selection rectangle
-        self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
-        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
-        self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
+        self.video_canvas.bind("<ButtonPress-1>", self.on_mouse_down)
+        self.video_canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.video_canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
         
-        # Text display area (right panel)
-        text_frame = tk.Frame(top_frame, bg="#f0f0f0", width=400)
-        text_frame.pack(side=tk.RIGHT, padx=5, pady=5, fill=tk.BOTH)
+        # Right panel containing text display and graph
+        right_panel = tk.Frame(top_frame, bg="#f0f0f0", width=400)
+        right_panel.pack(side=tk.RIGHT, padx=5, pady=5, fill=tk.BOTH, expand=True)
+        
+        # Text display area
+        text_frame = tk.Frame(right_panel, bg="#f0f0f0")
+        text_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
         # Text results
         tk.Label(text_frame, text="Extracted Text:", bg="#f0f0f0", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 5))
-        self.text_display = scrolledtext.ScrolledText(text_frame, wrap=tk.WORD, width=40, height=20, font=("Consolas", 10))
+        self.text_display = scrolledtext.ScrolledText(text_frame, wrap=tk.WORD, width=40, height=10, font=("Consolas", 10))
         self.text_display.pack(fill=tk.BOTH, expand=True)
+        
+        # Graph area
+        graph_frame = tk.Frame(right_panel, bg="#f0f0f0", height=300)
+        graph_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True, pady=10)
+        
+        # Graph title
+        tk.Label(graph_frame, text="Values Over Time:", bg="#f0f0f0", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 5))
+        
+        # Create matplotlib figure and canvas
+        self.fig = Figure(figsize=(5, 4), dpi=100)
+        self.plot = self.fig.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=graph_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Initialize empty graph
+        self.initialize_graph()
         
         # Bottom frame for controls
         bottom_frame = tk.Frame(main_frame, bg="#f0f0f0", height=150)
@@ -177,6 +201,11 @@ class VideoTextPlayer:
         self.auto_process_btn = ttk.Button(control_frame, text="Start Auto Processing", 
                                           command=self.toggle_auto_process, state=tk.DISABLED)
         self.auto_process_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Update graph button
+        self.update_graph_btn = ttk.Button(control_frame, text="Update Graph", 
+                                          command=self.update_graph, state=tk.DISABLED)
+        self.update_graph_btn.pack(side=tk.LEFT, padx=5)
         
         # Clear all selections button
         self.clear_all_btn = ttk.Button(control_frame, text="Clear All Selections", 
@@ -245,6 +274,7 @@ class VideoTextPlayer:
             self.extract_all_btn.config(state=tk.NORMAL)
             self.clear_all_btn.config(state=tk.NORMAL)
             self.auto_process_btn.config(state=tk.NORMAL)
+            self.update_graph_btn.config(state=tk.NORMAL)
             self.update_selection_type()
             
             # Start background processing thread
@@ -286,8 +316,8 @@ class VideoTextPlayer:
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(resized_frame))
         
         # Clear canvas and display the image
-        self.canvas.delete("all")
-        self.canvas.create_image(canvas_width // 2, canvas_height // 2, image=self.photo)
+        self.video_canvas.delete("all")
+        self.video_canvas.create_image(canvas_width // 2, canvas_height // 2, image=self.photo)
         
         # Redraw all active selection rectangles
         for sel_type, sel_data in self.selection_areas.items():
@@ -450,8 +480,8 @@ class VideoTextPlayer:
             return
             
         # Update the current position for drawing
-        sel_data["current_x"] = max(0, min(event.x, self.canvas.winfo_width()))
-        sel_data["current_y"] = max(0, min(event.y, self.canvas.winfo_height()))
+        sel_data["current_x"] = max(0, min(event.x, self.video_canvas.winfo_width()))
+        sel_data["current_y"] = max(0, min(event.y, self.video_canvas.winfo_height()))
             
         self.draw_selection_rectangle(self.current_selection_type)
     
@@ -468,7 +498,7 @@ class VideoTextPlayer:
         sel_data = self.selection_areas[selection_type]
         
         # Delete existing rectangle and all associated elements
-        self.canvas.delete(f"selection_{selection_type.name}")
+        self.video_canvas.delete(f"selection_{selection_type.name}")
             
         # Draw new rectangle
         x1 = min(sel_data["start_x"], sel_data["current_x"])
@@ -477,7 +507,7 @@ class VideoTextPlayer:
         y2 = max(sel_data["start_y"], sel_data["current_y"])
         
         # Create rectangle with a tag for easy deletion
-        sel_data["rect"] = self.canvas.create_rectangle(
+        sel_data["rect"] = self.video_canvas.create_rectangle(
             x1, y1, x2, y2, 
             outline=sel_data["color"], 
             width=2,
@@ -486,7 +516,7 @@ class VideoTextPlayer:
         )
         
         # Add label to the top-left corner with the same tag
-        self.canvas.create_text(
+        self.video_canvas.create_text(
             x1 + 5, y1 + 5,
             text=sel_data["label"],
             fill=sel_data["color"],
@@ -500,7 +530,7 @@ class VideoTextPlayer:
         sel_data["active"] = False
         
         # Delete all canvas elements with this selection's tag
-        self.canvas.delete(f"selection_{selection_type.name}")
+        self.video_canvas.delete(f"selection_{selection_type.name}")
         sel_data["rect"] = None
         
         # Reset the displayed value for this selection type
@@ -664,6 +694,66 @@ class VideoTextPlayer:
                 writer.writeheader()
                 
             writer.writerow(row)
+            
+        # Update graph periodically (every 100 frames) to avoid performance issues
+        if int(frame_number) % 100 == 0:
+            self.root.after(0, self.update_graph)
+    
+    def initialize_graph(self):
+        """Initialize an empty graph"""
+        self.plot.clear()
+        self.plot.set_xlabel('Frame')
+        self.plot.set_ylabel('Value')
+        self.plot.set_title('Credits, Bet, and Win Over Time')
+        self.plot.grid(True)
+        self.fig.tight_layout()
+        self.canvas.draw()
+    
+    def update_graph(self):
+        """Update the graph with data from the CSV file"""
+        if not os.path.exists(self.csv_file):
+            self.status_bar.config(text="No data to graph yet. Process some frames first.")
+            return
+            
+        try:
+            # Read the CSV file
+            df = pd.read_csv(self.csv_file)
+            
+            if len(df) == 0:
+                self.status_bar.config(text="No data in CSV file yet.")
+                return
+                
+            # Convert string values to numeric where possible
+            for col in ['Credits', 'Bet', 'Win']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Clear the plot
+            self.plot.clear()
+            
+            # Plot each series
+            if not df['Credits'].isna().all():
+                self.plot.plot(df['Frame'], df['Credits'], 'r-', label='Credits')
+            if not df['Bet'].isna().all():
+                self.plot.plot(df['Frame'], df['Bet'], 'b-', label='Bet')
+            if not df['Win'].isna().all():
+                self.plot.plot(df['Frame'], df['Win'], 'g-', label='Win')
+            
+            # Add labels and legend
+            self.plot.set_xlabel('Frame')
+            self.plot.set_ylabel('Value')
+            self.plot.set_title('Credits, Bet, and Win Over Time')
+            self.plot.grid(True)
+            self.plot.legend()
+            
+            # Adjust layout and redraw
+            self.fig.tight_layout()
+            self.canvas.draw()
+            
+            self.status_bar.config(text=f"Graph updated with {len(df)} data points.")
+            
+        except Exception as e:
+            self.status_bar.config(text=f"Error updating graph: {str(e)}")
+            print(f"Error updating graph: {str(e)}")
     
     def update_current_values(self, results):
         """Update the current values display"""
@@ -678,6 +768,10 @@ class VideoTextPlayer:
         if self.SelectionType.BET in results:
             self.current_values["Bet"] = results[self.SelectionType.BET]
             self.bet_label.config(text=f"Bet: {self.current_values['Bet']}")
+            
+        # Auto-update the graph if we have new data
+        if self.auto_process and any(key in results for key in [self.SelectionType.CREDITS, self.SelectionType.BET, self.SelectionType.WIN]):
+            self.root.after(1000, self.update_graph)  # Update graph after a delay to avoid too frequent updates
     
     def toggle_auto_process(self):
         """Toggle automatic processing of frames"""
