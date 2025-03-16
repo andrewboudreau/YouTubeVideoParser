@@ -32,6 +32,20 @@ class VideoTextPlayer:
         self.extracted_frames_dir = "extracted_frames"
         os.makedirs(self.extracted_frames_dir, exist_ok=True)
         
+        # Selection rectangle variables
+        self.selection_active = False
+        self.selection_rect = None
+        self.start_x = 0
+        self.start_y = 0
+        self.current_x = 0
+        self.current_y = 0
+        self.resize_handle = None
+        self.resize_active = False
+        self.handle_size = 10
+        self.current_frame_image = None
+        self.scale_factor_x = 1.0
+        self.scale_factor_y = 1.0
+        
         # Create UI components
         self.create_widgets()
         
@@ -55,6 +69,11 @@ class VideoTextPlayer:
         # Canvas for video display
         self.canvas = tk.Canvas(self.video_frame, bg="black", width=800, height=450)
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        
+        # Bind mouse events for selection rectangle
+        self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
+        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
         
         # Text display area (right panel)
         text_frame = tk.Frame(top_frame, bg="#f0f0f0", width=400)
@@ -84,6 +103,14 @@ class VideoTextPlayer:
         # Extract text button
         self.extract_btn = ttk.Button(control_frame, text="Extract Text from Frame", command=self.extract_current_frame, state=tk.DISABLED)
         self.extract_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Extract from selection button
+        self.extract_selection_btn = ttk.Button(control_frame, text="Extract from Selection", command=self.extract_from_selection, state=tk.DISABLED)
+        self.extract_selection_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Clear selection button
+        self.clear_selection_btn = ttk.Button(control_frame, text="Clear Selection", command=self.clear_selection, state=tk.DISABLED)
+        self.clear_selection_btn.pack(side=tk.LEFT, padx=5)
         
         # Time display
         self.time_label = tk.Label(control_frame, text="00:00:00 / 00:00:00", bg="#f0f0f0", font=("Arial", 10))
@@ -144,6 +171,8 @@ class VideoTextPlayer:
             self.progress_bar.config(state=tk.NORMAL)
             self.play_pause_btn.config(state=tk.NORMAL)
             self.extract_btn.config(state=tk.NORMAL)
+            self.extract_selection_btn.config(state=tk.NORMAL)
+            self.clear_selection_btn.config(state=tk.NORMAL)
             
             # Update status
             video_name = os.path.basename(file_path)
@@ -163,7 +192,14 @@ class VideoTextPlayer:
         new_w = int(frame_w * ratio)
         new_h = int(frame_h * ratio)
         
+        # Store scale factors for coordinate conversion
+        self.scale_factor_x = frame_w / new_w
+        self.scale_factor_y = frame_h / new_h
+        
         resized_frame = cv2.resize(rgb_frame, (new_w, new_h))
+        
+        # Store the current frame for OCR processing
+        self.current_frame_image = frame.copy()
         
         # Convert to PhotoImage
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(resized_frame))
@@ -171,6 +207,10 @@ class VideoTextPlayer:
         # Clear canvas and display the image
         self.canvas.delete("all")
         self.canvas.create_image(canvas_width // 2, canvas_height // 2, image=self.photo)
+        
+        # Redraw selection rectangle if it exists
+        if self.selection_active:
+            self.draw_selection_rectangle()
     
     def toggle_play_pause(self):
         if not self.cap:
@@ -331,6 +371,184 @@ class VideoTextPlayer:
             
         except Exception as e:
             self.status_bar.config(text=f"Error extracting text: {str(e)}")
+            self.text_display.delete(1.0, tk.END)
+            self.text_display.insert(tk.END, f"Error extracting text: {str(e)}")
+        
+        # Reset position to maintain continuity
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
+    
+    def on_mouse_down(self, event):
+        if not self.cap:
+            return
+            
+        # Check if clicking on resize handle
+        if self.selection_active and self.resize_handle:
+            handle_coords = self.canvas.coords(self.resize_handle)
+            if (abs(event.x - handle_coords[0]) <= self.handle_size and 
+                abs(event.y - handle_coords[1]) <= self.handle_size):
+                self.resize_active = True
+                return
+                
+        # Start a new selection
+        self.clear_selection()
+        self.selection_active = True
+        self.start_x = event.x
+        self.start_y = event.y
+        self.current_x = event.x
+        self.current_y = event.y
+        self.draw_selection_rectangle()
+    
+    def on_mouse_drag(self, event):
+        if not self.selection_active:
+            return
+            
+        if self.resize_active:
+            # Resizing the selection
+            self.current_x = max(0, min(event.x, self.canvas.winfo_width()))
+            self.current_y = max(0, min(event.y, self.canvas.winfo_height()))
+        else:
+            # Creating/moving the selection
+            self.current_x = event.x
+            self.current_y = event.y
+            
+        self.draw_selection_rectangle()
+    
+    def on_mouse_up(self, event):
+        self.resize_active = False
+        # Ensure the rectangle has some minimum size
+        if abs(self.current_x - self.start_x) < 10 or abs(self.current_y - self.start_y) < 10:
+            if not self.resize_active:  # Only clear if not resizing
+                self.clear_selection()
+    
+    def draw_selection_rectangle(self):
+        # Delete existing rectangle
+        if self.selection_rect:
+            self.canvas.delete(self.selection_rect)
+        if self.resize_handle:
+            self.canvas.delete(self.resize_handle)
+            
+        # Draw new rectangle
+        x1 = min(self.start_x, self.current_x)
+        y1 = min(self.start_y, self.current_y)
+        x2 = max(self.start_x, self.current_x)
+        y2 = max(self.start_y, self.current_y)
+        
+        self.selection_rect = self.canvas.create_rectangle(
+            x1, y1, x2, y2, 
+            outline="red", 
+            width=2,
+            dash=(5, 5)
+        )
+        
+        # Add resize handle at bottom-right corner
+        self.resize_handle = self.canvas.create_rectangle(
+            x2 - self.handle_size, y2 - self.handle_size,
+            x2 + self.handle_size, y2 + self.handle_size,
+            fill="red", outline="white"
+        )
+    
+    def clear_selection(self):
+        self.selection_active = False
+        self.resize_active = False
+        if self.selection_rect:
+            self.canvas.delete(self.selection_rect)
+            self.selection_rect = None
+        if self.resize_handle:
+            self.canvas.delete(self.resize_handle)
+            self.resize_handle = None
+    
+    def extract_from_selection(self):
+        if not self.cap or not self.selection_active or not self.current_frame_image is not None:
+            if not self.selection_active:
+                self.status_bar.config(text="Please create a selection rectangle first")
+            return
+            
+        # Get the current frame position
+        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+        
+        # Get selection coordinates
+        x1 = min(self.start_x, self.current_x)
+        y1 = min(self.start_y, self.current_y)
+        x2 = max(self.start_x, self.current_x)
+        y2 = max(self.start_y, self.current_y)
+        
+        # Convert to original image coordinates
+        orig_x1 = int(x1 * self.scale_factor_x)
+        orig_y1 = int(y1 * self.scale_factor_y)
+        orig_x2 = int(x2 * self.scale_factor_x)
+        orig_y2 = int(y2 * self.scale_factor_y)
+        
+        # Ensure coordinates are within image bounds
+        frame_h, frame_w = self.current_frame_image.shape[:2]
+        orig_x1 = max(0, min(orig_x1, frame_w))
+        orig_y1 = max(0, min(orig_y1, frame_h))
+        orig_x2 = max(0, min(orig_x2, frame_w))
+        orig_y2 = max(0, min(orig_y2, frame_h))
+        
+        # Crop the image
+        cropped_frame = self.current_frame_image[orig_y1:orig_y2, orig_x1:orig_x2]
+        
+        if cropped_frame.size == 0:
+            self.status_bar.config(text="Selection area is too small or invalid")
+            return
+            
+        # Save the cropped frame
+        frame_filename = os.path.join(self.extracted_frames_dir, f"frame_{int(current_pos):06d}_cropped.jpg")
+        cv2.imwrite(frame_filename, cropped_frame)
+        
+        # Process the cropped frame with OCR
+        try:
+            # Extract text data with positions
+            data = pytesseract.image_to_data(cropped_frame, output_type=pytesseract.Output.DICT)
+            
+            # Clear previous text
+            self.text_display.delete(1.0, tk.END)
+            
+            # Get timestamp
+            timestamp = timedelta(seconds=current_pos/self.fps)
+            
+            # Create header for results
+            self.text_display.insert(tk.END, f"Selected Region from Frame {int(current_pos)} (Time: {timestamp})\n")
+            self.text_display.insert(tk.END, f"Region: ({orig_x1}, {orig_y1}) to ({orig_x2}, {orig_y2})\n\n")
+            
+            # Track if any text was found
+            text_found = False
+            
+            # Process all text found
+            for i in range(len(data['text'])):
+                # Skip empty text
+                if not data['text'][i].strip():
+                    continue
+                
+                text_found = True
+                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+                conf = data['conf'][i]
+                text = data['text'][i]
+                
+                # Add text with position to display
+                self.text_display.insert(tk.END, f"Text: '{text}' (Confidence: {conf}%)\n")
+                self.text_display.insert(tk.END, f"Position: x={x}, y={y}, width={w}, height={h}\n\n")
+                
+                # Draw rectangle on the cropped frame copy to show text location
+                cv2.rectangle(cropped_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            
+            if not text_found:
+                self.text_display.insert(tk.END, "No text detected in the selected region.\n")
+            
+            # Save the annotated cropped frame
+            annotated_filename = os.path.join(self.extracted_frames_dir, f"frame_{int(current_pos):06d}_cropped_annotated.jpg")
+            cv2.imwrite(annotated_filename, cropped_frame)
+            
+            # Display the annotated frame with selection rectangle
+            display_frame = self.current_frame_image.copy()
+            cv2.rectangle(display_frame, (orig_x1, orig_y1), (orig_x2, orig_y2), (0, 0, 255), 2)
+            self.display_frame(display_frame)
+            
+            # Update status
+            self.status_bar.config(text=f"Text extracted from selected region. Cropped frame saved as {frame_filename}")
+            
+        except Exception as e:
+            self.status_bar.config(text=f"Error extracting text from selection: {str(e)}")
             self.text_display.delete(1.0, tk.END)
             self.text_display.insert(tk.END, f"Error extracting text: {str(e)}")
         
