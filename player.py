@@ -1,5 +1,4 @@
 import cv2
-import pytesseract
 import os
 import tkinter as tk
 from tkinter import filedialog, ttk, scrolledtext
@@ -11,12 +10,18 @@ import time
 import csv
 from enum import Enum, auto
 import queue
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 class VideoTextPlayer:
     def __init__(self, root):
-        # Initialize Tesseract path - update this for your system if needed
-        self.tesseract_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-        pytesseract.pytesseract.tesseract_cmd = self.tesseract_path
+        # Initialize TrOCR model
+        self.model_name = "microsoft/trocr-base-printed"
+        self.status_bar_text = "Loading TrOCR model... This may take a moment."
+        
+        # We'll load the model in a separate thread to keep the UI responsive
+        self.model_loaded = False
+        self.model_thread = threading.Thread(target=self.load_trocr_model)
+        self.model_thread.daemon = True
         
         # Main window setup
         self.root = root
@@ -253,6 +258,9 @@ class VideoTextPlayer:
             self.processing_thread = threading.Thread(target=self.process_queue)
             self.processing_thread.daemon = True
             self.processing_thread.start()
+        
+            # Start model loading thread
+            self.model_thread.start()
             
             # Update status
             video_name = os.path.basename(file_path)
@@ -353,6 +361,18 @@ class VideoTextPlayer:
             # Control playback speed
             time.sleep(1 / self.fps)
     
+    def load_trocr_model(self):
+        """Load the TrOCR model in a background thread"""
+        try:
+            self.processor = TrOCRProcessor.from_pretrained(self.model_name)
+            self.model = VisionEncoderDecoderModel.from_pretrained(self.model_name)
+            self.model_loaded = True
+            self.root.after(0, lambda: self.status_bar.config(text="TrOCR model loaded successfully. Ready to process text."))
+        except Exception as e:
+            error_msg = f"Error loading TrOCR model: {str(e)}"
+            print(error_msg)
+            self.root.after(0, lambda: self.status_bar.config(text=error_msg))
+    
     def update_time_label(self):
         if not self.cap:
             return
@@ -405,6 +425,10 @@ class VideoTextPlayer:
     def extract_current_frame(self):
         if not self.cap:
             return
+            
+        if not self.model_loaded:
+            self.status_bar.config(text="Please wait for the TrOCR model to finish loading...")
+            return
         
         # Get the current frame with lock
         with self.video_lock:
@@ -423,10 +447,16 @@ class VideoTextPlayer:
         frame_filename = os.path.join(self.extracted_frames_dir, f"frame_{int(current_pos):06d}.jpg")
         cv2.imwrite(frame_filename, frame)
         
-        # Process the frame with OCR
+        # Process the frame with TrOCR
         try:
-            # Extract text data with positions
-            data = pytesseract.image_to_data(frame, output_type=pytesseract.Output.DICT)
+            # Convert OpenCV BGR to RGB for PIL
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_frame)
+            
+            # Process the image with TrOCR
+            pixel_values = self.processor(pil_image, return_tensors="pt").pixel_values
+            generated_ids = self.model.generate(pixel_values)
+            extracted_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
             
             # Clear previous text
             self.text_display.delete(1.0, tk.END)
@@ -437,28 +467,13 @@ class VideoTextPlayer:
             # Create header for results
             self.text_display.insert(tk.END, f"Frame {int(current_pos)} (Time: {timestamp})\n\n")
             
-            # Track if any text was found
-            text_found = False
-            
-            # Process all text found
-            for i in range(len(data['text'])):
-                # Skip empty text
-                if not data['text'][i].strip():
-                    continue
+            if extracted_text.strip():
+                # Add text to display
+                self.text_display.insert(tk.END, f"Extracted Text:\n{extracted_text}\n\n")
                 
-                text_found = True
-                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
-                conf = data['conf'][i]
-                text = data['text'][i]
-                
-                # Add text with position to display
-                self.text_display.insert(tk.END, f"Text: '{text}' (Confidence: {conf}%)\n")
-                self.text_display.insert(tk.END, f"Position: x={x}, y={y}, width={w}, height={h}\n\n")
-                
-                # Draw rectangle on the frame copy to show text location
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            
-            if not text_found:
+                # Since TrOCR doesn't provide bounding boxes, we'll just add a label to the frame
+                cv2.putText(frame, "Text detected", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            else:
                 self.text_display.insert(tk.END, "No text detected in this frame.\n")
             
             # Display the annotated frame
@@ -629,8 +644,12 @@ class VideoTextPlayer:
         self.text_display.delete(1.0, tk.END)
     
     def extract_from_selection(self, selection_type):
-        """Extract text from a specific selection area"""
+        """Extract text from a specific selection area using TrOCR"""
         if not self.cap or not self.current_frame_image is not None:
+            return None, None
+            
+        if not self.model_loaded:
+            print("TrOCR model not loaded yet")
             return None, None
             
         sel_data = self.selection_areas[selection_type]
@@ -670,10 +689,16 @@ class VideoTextPlayer:
         )
         cv2.imwrite(frame_filename, cropped_frame)
         
-        # Process the cropped frame with OCR
+        # Process the cropped frame with TrOCR
         try:
-            # Extract text data
-            text = pytesseract.image_to_string(cropped_frame).strip()
+            # Convert OpenCV BGR to RGB for PIL
+            rgb_cropped = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_cropped)
+            
+            # Process with TrOCR
+            pixel_values = self.processor(pil_image, return_tensors="pt").pixel_values
+            generated_ids = self.model.generate(pixel_values)
+            text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
             
             # Draw rectangle on the frame to show the selection
             display_frame = self.current_frame_image.copy()
@@ -817,8 +842,12 @@ class VideoTextPlayer:
                 time.sleep(1)  # Avoid tight loop in case of persistent errors
     
     def process_frame_in_background(self, frame_number):
-        """Process a frame in the background thread"""
+        """Process a frame in the background thread using TrOCR"""
         if not self.cap or self.frame_buffer is None:
+            return
+            
+        if not self.model_loaded:
+            print("TrOCR model not loaded yet, skipping frame processing")
             return
             
         # Use the buffered frame instead of accessing the video file
@@ -860,8 +889,15 @@ class VideoTextPlayer:
                 continue
                 
             try:
-                # Extract text data
-                text = pytesseract.image_to_string(cropped_frame).strip()
+                # Convert OpenCV BGR to RGB for PIL
+                rgb_cropped = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(rgb_cropped)
+                
+                # Process with TrOCR
+                pixel_values = self.processor(pil_image, return_tensors="pt").pixel_values
+                generated_ids = self.model.generate(pixel_values)
+                text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+                
                 if text:
                     results[sel_type] = text
             except Exception as e:
