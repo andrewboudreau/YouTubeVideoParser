@@ -165,10 +165,10 @@ class VideoTextPlayer:
         tk.Label(selection_frame, text="Selection:", bg="#f0f0f0").pack(side=tk.LEFT)
         tk.Radiobutton(selection_frame, text="Credits", variable=self.selection_var, 
                       value="CREDITS", bg="#f0f0f0", command=self.update_selection_type).pack(side=tk.LEFT)
-        tk.Radiobutton(selection_frame, text="Win", variable=self.selection_var, 
-                      value="WIN", bg="#f0f0f0", command=self.update_selection_type).pack(side=tk.LEFT)
         tk.Radiobutton(selection_frame, text="Bet", variable=self.selection_var, 
                       value="BET", bg="#f0f0f0", command=self.update_selection_type).pack(side=tk.LEFT)
+        tk.Radiobutton(selection_frame, text="Win", variable=self.selection_var, 
+                      value="WIN", bg="#f0f0f0", command=self.update_selection_type).pack(side=tk.LEFT)
         
         # Extract from all selections button
         self.extract_all_btn = ttk.Button(control_frame, text="Extract All & Save to CSV", 
@@ -609,10 +609,24 @@ class VideoTextPlayer:
         if sel_data["handle"]:
             self.canvas.delete(sel_data["handle"])
             sel_data["handle"] = None
+        
+        # Reset the displayed value for this selection type
+        if selection_type == self.SelectionType.CREDITS:
+            self.current_values["Credits"] = "N/A"
+            self.credits_label.config(text="Credits: N/A")
+        elif selection_type == self.SelectionType.BET:
+            self.current_values["Bet"] = "N/A"
+            self.bet_label.config(text="Bet: N/A")
+        elif selection_type == self.SelectionType.WIN:
+            self.current_values["Win"] = "N/A"
+            self.win_label.config(text="Win: N/A")
     
     def clear_all_selections(self):
         for sel_type in self.selection_areas:
             self.clear_selection(sel_type)
+        
+        # Also clear the text display
+        self.text_display.delete(1.0, tk.END)
     
     def extract_from_selection(self, selection_type):
         """Extract text from a specific selection area"""
@@ -728,8 +742,8 @@ class VideoTextPlayer:
             'Frame': int(frame_number),
             'Timestamp': str(timestamp),
             'Credits': results.get(self.SelectionType.CREDITS, ''),
-            'Win': results.get(self.SelectionType.WIN, ''),
-            'Bet': results.get(self.SelectionType.BET, '')
+            'Bet': results.get(self.SelectionType.BET, ''),
+            'Win': results.get(self.SelectionType.WIN, '')
         }
         
         # Update current values display
@@ -740,7 +754,7 @@ class VideoTextPlayer:
         
         # Write to CSV
         with open(self.csv_file, 'a', newline='') as csvfile:
-            fieldnames = ['Frame', 'Timestamp', 'Credits', 'Win', 'Bet']
+            fieldnames = ['Frame', 'Timestamp', 'Credits', 'Bet', 'Win']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             
             if not file_exists:
