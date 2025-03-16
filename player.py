@@ -555,6 +555,25 @@ class VideoTextPlayer:
         # Also clear the text display
         self.text_display.delete(1.0, tk.END)
     
+    def clean_numeric_text(self, text):
+        """Clean text to extract only numeric values (with decimal points)"""
+        if not text:
+            return ""
+            
+        # Remove '$' and spaces
+        cleaned = text.replace('$', '').replace(' ', '')
+        
+        # Keep only digits and decimal points
+        result = ''.join(char for char in cleaned if char.isdigit() or char == '.')
+        
+        # Try to convert to float to validate it's a number
+        try:
+            float(result)
+            return result
+        except ValueError:
+            # If it's not a valid number, return empty string
+            return ""
+    
     def extract_from_selection(self, selection_type):
         """Extract text from a specific selection area using TrOCR"""
         if not self.cap or not self.current_frame_image is not None:
@@ -610,7 +629,10 @@ class VideoTextPlayer:
             # Process with TrOCR
             pixel_values = self.processor(pil_image, return_tensors="pt").pixel_values
             generated_ids = self.model.generate(pixel_values)
-            text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+            raw_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+            
+            # Clean the text to extract only numeric values
+            cleaned_text = self.clean_numeric_text(raw_text)
             
             # Draw rectangle on the frame to show the selection
             display_frame = self.current_frame_image.copy()
@@ -624,7 +646,13 @@ class VideoTextPlayer:
                 2
             )
             
-            return text, frame_filename
+            # Return both the raw text (for display) and the cleaned text (for CSV)
+            if cleaned_text:
+                return f"{raw_text} → {cleaned_text}", frame_filename
+            elif raw_text:
+                return f"{raw_text} (not a valid number)", frame_filename
+            else:
+                return None, frame_filename
             
         except Exception as e:
             print(f"Error extracting text from {sel_data['label']}: {str(e)}")
@@ -945,10 +973,13 @@ class VideoTextPlayer:
                 # Process with TrOCR
                 pixel_values = self.processor(pil_image, return_tensors="pt").pixel_values
                 generated_ids = self.model.generate(pixel_values)
-                text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+                raw_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
                 
-                if text:
-                    results[sel_type] = text
+                # Clean the text to extract only numeric values
+                cleaned_text = self.clean_numeric_text(raw_text)
+                
+                if cleaned_text:
+                    results[sel_type] = cleaned_text
             except Exception as e:
                 print(f"Error extracting text from {sel_data['label']}: {str(e)}")
         
