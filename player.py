@@ -178,6 +178,10 @@ class VideoTextPlayer:
         # Play/Pause button
         self.play_pause_btn = ttk.Button(control_frame, text="Play", command=self.toggle_play_pause, state=tk.DISABLED)
         self.play_pause_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Extract current frame button (this was missing)
+        self.extract_btn = ttk.Button(control_frame, text="Extract Current Frame", command=self.extract_current_frame, state=tk.DISABLED)
+        self.extract_btn.pack(side=tk.LEFT, padx=5)
                 
         # Selection type radio buttons
         selection_frame = tk.Frame(control_frame, bg="#f0f0f0")
@@ -812,6 +816,79 @@ class VideoTextPlayer:
             except Exception as e:
                 print(f"Error in processing thread: {str(e)}")
                 time.sleep(1)  # Avoid tight loop in case of persistent errors
+    
+    def extract_current_frame(self):
+        """Extract text from the current frame"""
+        if not self.cap:
+            return
+            
+        if not self.model_loaded:
+            self.status_bar.config(text="Please wait for the TrOCR model to finish loading...")
+            return
+        
+        # Get the current frame with lock
+        with self.video_lock:
+            current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos - 1)  # Adjust for already moved position
+            ret, frame = self.cap.read()
+            
+            if not ret:
+                self.status_bar.config(text="Error: Could not read current frame")
+                return
+                
+            # Make a copy of the frame to avoid threading issues
+            frame = frame.copy()
+        
+        # Save the frame
+        frame_filename = os.path.join(self.extracted_frames_dir, f"frame_{int(current_pos):06d}.jpg")
+        cv2.imwrite(frame_filename, frame)
+        
+        # Process the frame with TrOCR
+        try:
+            # Convert OpenCV BGR to RGB for PIL
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_frame)
+            
+            # Process the image with TrOCR
+            pixel_values = self.processor(pil_image, return_tensors="pt").pixel_values
+            generated_ids = self.model.generate(pixel_values)
+            extracted_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            
+            # Clear previous text
+            self.text_display.delete(1.0, tk.END)
+            
+            # Get timestamp
+            timestamp = timedelta(seconds=current_pos/self.fps)
+            
+            # Create header for results
+            self.text_display.insert(tk.END, f"Frame {int(current_pos)} (Time: {timestamp})\n\n")
+            
+            if extracted_text.strip():
+                # Add text to display
+                self.text_display.insert(tk.END, f"Extracted Text:\n{extracted_text}\n\n")
+                
+                # Since TrOCR doesn't provide bounding boxes, we'll just add a label to the frame
+                cv2.putText(frame, "Text detected", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            else:
+                self.text_display.insert(tk.END, "No text detected in this frame.\n")
+            
+            # Display the annotated frame
+            self.display_frame(frame)
+            
+            # Save the annotated frame
+            annotated_filename = os.path.join(self.extracted_frames_dir, f"frame_{int(current_pos):06d}_annotated.jpg")
+            cv2.imwrite(annotated_filename, frame)
+            
+            # Update status
+            self.status_bar.config(text=f"Text extracted from frame {int(current_pos)}. Frame saved as {frame_filename}")
+            
+        except Exception as e:
+            self.status_bar.config(text=f"Error extracting text: {str(e)}")
+            self.text_display.delete(1.0, tk.END)
+            self.text_display.insert(tk.END, f"Error extracting text: {str(e)}")
+        
+        # Reset position to maintain continuity
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
     
     def process_frame_in_background(self, frame_number):
         """Process a frame in the background thread using TrOCR"""
