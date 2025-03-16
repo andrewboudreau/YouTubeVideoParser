@@ -153,9 +153,9 @@ class VideoTextPlayer:
         # Convert frame from BGR to RGB for display
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Get canvas dimensions
-        canvas_width = self.canvas.winfo_width()
-        canvas_height = self.canvas.winfo_height()
+        # Get fixed canvas dimensions - use the initial dimensions
+        canvas_width = 800
+        canvas_height = 450
         
         # Resize frame to fit canvas while maintaining aspect ratio
         frame_h, frame_w = frame.shape[:2]
@@ -168,9 +168,9 @@ class VideoTextPlayer:
         # Convert to PhotoImage
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(resized_frame))
         
-        # Update canvas
-        self.canvas.config(width=new_w, height=new_h)
-        self.canvas.create_image(new_w // 2, new_h // 2, image=self.photo)
+        # Clear canvas and display the image
+        self.canvas.delete("all")
+        self.canvas.create_image(canvas_width // 2, canvas_height // 2, image=self.photo)
     
     def toggle_play_pause(self):
         if not self.cap:
