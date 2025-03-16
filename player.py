@@ -8,6 +8,8 @@ import numpy as np
 from datetime import timedelta
 import threading
 import time
+import csv
+from enum import Enum, auto
 
 class VideoTextPlayer:
     def __init__(self, root):
@@ -32,19 +34,37 @@ class VideoTextPlayer:
         self.extracted_frames_dir = "extracted_frames"
         os.makedirs(self.extracted_frames_dir, exist_ok=True)
         
+        # Define selection area types
+        class SelectionType(Enum):
+            CREDITS = auto()
+            WIN = auto()
+            BET = auto()
+            
+        self.SelectionType = SelectionType
+        
         # Selection rectangle variables
-        self.selection_active = False
-        self.selection_rect = None
-        self.start_x = 0
-        self.start_y = 0
-        self.current_x = 0
-        self.current_y = 0
-        self.resize_handle = None
+        self.current_selection_type = None
+        self.selection_areas = {
+            SelectionType.CREDITS: {"active": False, "rect": None, "handle": None, 
+                                   "start_x": 0, "start_y": 0, "current_x": 0, "current_y": 0,
+                                   "color": "red", "label": "Credits"},
+            SelectionType.WIN: {"active": False, "rect": None, "handle": None, 
+                               "start_x": 0, "start_y": 0, "current_x": 0, "current_y": 0,
+                               "color": "green", "label": "Win"},
+            SelectionType.BET: {"active": False, "rect": None, "handle": None, 
+                               "start_x": 0, "start_y": 0, "current_x": 0, "current_y": 0,
+                               "color": "blue", "label": "Bet"}
+        }
+        
         self.resize_active = False
         self.handle_size = 10
         self.current_frame_image = None
         self.scale_factor_x = 1.0
         self.scale_factor_y = 1.0
+        
+        # CSV file for saving extracted data
+        self.csv_file = "extracted_data.csv"
+        self.csv_header_written = False
         
         # Create UI components
         self.create_widgets()
@@ -104,13 +124,28 @@ class VideoTextPlayer:
         self.extract_btn = ttk.Button(control_frame, text="Extract Text from Frame", command=self.extract_current_frame, state=tk.DISABLED)
         self.extract_btn.pack(side=tk.LEFT, padx=5)
         
-        # Extract from selection button
-        self.extract_selection_btn = ttk.Button(control_frame, text="Extract from Selection", command=self.extract_from_selection, state=tk.DISABLED)
-        self.extract_selection_btn.pack(side=tk.LEFT, padx=5)
+        # Selection type radio buttons
+        selection_frame = tk.Frame(control_frame, bg="#f0f0f0")
+        selection_frame.pack(side=tk.LEFT, padx=5)
         
-        # Clear selection button
-        self.clear_selection_btn = ttk.Button(control_frame, text="Clear Selection", command=self.clear_selection, state=tk.DISABLED)
-        self.clear_selection_btn.pack(side=tk.LEFT, padx=5)
+        self.selection_var = tk.StringVar(value="CREDITS")
+        tk.Label(selection_frame, text="Selection:", bg="#f0f0f0").pack(side=tk.LEFT)
+        tk.Radiobutton(selection_frame, text="Credits", variable=self.selection_var, 
+                      value="CREDITS", bg="#f0f0f0", command=self.update_selection_type).pack(side=tk.LEFT)
+        tk.Radiobutton(selection_frame, text="Win", variable=self.selection_var, 
+                      value="WIN", bg="#f0f0f0", command=self.update_selection_type).pack(side=tk.LEFT)
+        tk.Radiobutton(selection_frame, text="Bet", variable=self.selection_var, 
+                      value="BET", bg="#f0f0f0", command=self.update_selection_type).pack(side=tk.LEFT)
+        
+        # Extract from all selections button
+        self.extract_all_btn = ttk.Button(control_frame, text="Extract All & Save to CSV", 
+                                         command=self.extract_all_selections, state=tk.DISABLED)
+        self.extract_all_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Clear all selections button
+        self.clear_all_btn = ttk.Button(control_frame, text="Clear All Selections", 
+                                       command=self.clear_all_selections, state=tk.DISABLED)
+        self.clear_all_btn.pack(side=tk.LEFT, padx=5)
         
         # Time display
         self.time_label = tk.Label(control_frame, text="00:00:00 / 00:00:00", bg="#f0f0f0", font=("Arial", 10))
@@ -171,8 +206,9 @@ class VideoTextPlayer:
             self.progress_bar.config(state=tk.NORMAL)
             self.play_pause_btn.config(state=tk.NORMAL)
             self.extract_btn.config(state=tk.NORMAL)
-            self.extract_selection_btn.config(state=tk.NORMAL)
-            self.clear_selection_btn.config(state=tk.NORMAL)
+            self.extract_all_btn.config(state=tk.NORMAL)
+            self.clear_all_btn.config(state=tk.NORMAL)
+            self.update_selection_type()
             
             # Update status
             video_name = os.path.basename(file_path)
@@ -208,9 +244,10 @@ class VideoTextPlayer:
         self.canvas.delete("all")
         self.canvas.create_image(canvas_width // 2, canvas_height // 2, image=self.photo)
         
-        # Redraw selection rectangle if it exists
-        if self.selection_active:
-            self.draw_selection_rectangle()
+        # Redraw all active selection rectangles
+        for sel_type, sel_data in self.selection_areas.items():
+            if sel_data["active"]:
+                self.draw_selection_rectangle(sel_type)
     
     def toggle_play_pause(self):
         if not self.cap:
@@ -377,100 +414,155 @@ class VideoTextPlayer:
         # Reset position to maintain continuity
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
     
+    def update_selection_type(self):
+        """Update the current selection type based on radio button selection"""
+        selection_str = self.selection_var.get()
+        if selection_str == "CREDITS":
+            self.current_selection_type = self.SelectionType.CREDITS
+        elif selection_str == "WIN":
+            self.current_selection_type = self.SelectionType.WIN
+        elif selection_str == "BET":
+            self.current_selection_type = self.SelectionType.BET
+    
     def on_mouse_down(self, event):
-        if not self.cap:
+        if not self.cap or not self.current_selection_type:
             return
             
-        # Check if clicking on resize handle
-        if self.selection_active and self.resize_handle:
-            handle_coords = self.canvas.coords(self.resize_handle)
+        sel_data = self.selection_areas[self.current_selection_type]
+        
+        # Check if clicking on resize handle of current selection type
+        if sel_data["active"] and sel_data["handle"]:
+            handle_coords = self.canvas.coords(sel_data["handle"])
             if (abs(event.x - handle_coords[0]) <= self.handle_size and 
                 abs(event.y - handle_coords[1]) <= self.handle_size):
                 self.resize_active = True
                 return
+        
+        # Check if clicking inside any existing selection rectangle to move it
+        for sel_type, data in self.selection_areas.items():
+            if data["active"] and data["rect"]:
+                coords = self.canvas.coords(data["rect"])
+                if (coords[0] <= event.x <= coords[2] and 
+                    coords[1] <= event.y <= coords[3]):
+                    # Switch to this selection type
+                    self.current_selection_type = sel_type
+                    self.selection_var.set(sel_type.name)
+                    
+                    # Calculate offset for moving
+                    sel_data = self.selection_areas[sel_type]
+                    sel_data["start_x"] = sel_data["start_x"] - (event.x - coords[0])
+                    sel_data["start_y"] = sel_data["start_y"] - (event.y - coords[1])
+                    sel_data["current_x"] = sel_data["current_x"] - (event.x - coords[0])
+                    sel_data["current_y"] = sel_data["current_y"] - (event.y - coords[1])
+                    
+                    self.resize_active = False
+                    return
                 
-        # Start a new selection
-        self.clear_selection()
-        self.selection_active = True
-        self.start_x = event.x
-        self.start_y = event.y
-        self.current_x = event.x
-        self.current_y = event.y
-        self.draw_selection_rectangle()
+        # Start a new selection for current type
+        sel_data = self.selection_areas[self.current_selection_type]
+        sel_data["active"] = True
+        sel_data["start_x"] = event.x
+        sel_data["start_y"] = event.y
+        sel_data["current_x"] = event.x
+        sel_data["current_y"] = event.y
+        self.draw_selection_rectangle(self.current_selection_type)
     
     def on_mouse_drag(self, event):
-        if not self.selection_active:
+        if not self.cap or not self.current_selection_type:
+            return
+            
+        sel_data = self.selection_areas[self.current_selection_type]
+        if not sel_data["active"]:
             return
             
         if self.resize_active:
             # Resizing the selection
-            self.current_x = max(0, min(event.x, self.canvas.winfo_width()))
-            self.current_y = max(0, min(event.y, self.canvas.winfo_height()))
+            sel_data["current_x"] = max(0, min(event.x, self.canvas.winfo_width()))
+            sel_data["current_y"] = max(0, min(event.y, self.canvas.winfo_height()))
         else:
             # Creating/moving the selection
-            self.current_x = event.x
-            self.current_y = event.y
+            sel_data["current_x"] = event.x
+            sel_data["current_y"] = event.y
             
-        self.draw_selection_rectangle()
+        self.draw_selection_rectangle(self.current_selection_type)
     
     def on_mouse_up(self, event):
         self.resize_active = False
+        if not self.current_selection_type:
+            return
+            
+        sel_data = self.selection_areas[self.current_selection_type]
         # Ensure the rectangle has some minimum size
-        if abs(self.current_x - self.start_x) < 10 or abs(self.current_y - self.start_y) < 10:
+        if abs(sel_data["current_x"] - sel_data["start_x"]) < 10 or abs(sel_data["current_y"] - sel_data["start_y"]) < 10:
             if not self.resize_active:  # Only clear if not resizing
-                self.clear_selection()
+                self.clear_selection(self.current_selection_type)
     
-    def draw_selection_rectangle(self):
+    def draw_selection_rectangle(self, selection_type):
+        sel_data = self.selection_areas[selection_type]
+        
         # Delete existing rectangle
-        if self.selection_rect:
-            self.canvas.delete(self.selection_rect)
-        if self.resize_handle:
-            self.canvas.delete(self.resize_handle)
+        if sel_data["rect"]:
+            self.canvas.delete(sel_data["rect"])
+        if sel_data["handle"]:
+            self.canvas.delete(sel_data["handle"])
             
         # Draw new rectangle
-        x1 = min(self.start_x, self.current_x)
-        y1 = min(self.start_y, self.current_y)
-        x2 = max(self.start_x, self.current_x)
-        y2 = max(self.start_y, self.current_y)
+        x1 = min(sel_data["start_x"], sel_data["current_x"])
+        y1 = min(sel_data["start_y"], sel_data["current_y"])
+        x2 = max(sel_data["start_x"], sel_data["current_x"])
+        y2 = max(sel_data["start_y"], sel_data["current_y"])
         
-        self.selection_rect = self.canvas.create_rectangle(
+        sel_data["rect"] = self.canvas.create_rectangle(
             x1, y1, x2, y2, 
-            outline="red", 
+            outline=sel_data["color"], 
             width=2,
             dash=(5, 5)
         )
         
+        # Add label to the top-left corner
+        self.canvas.create_text(
+            x1 + 5, y1 + 5,
+            text=sel_data["label"],
+            fill=sel_data["color"],
+            anchor=tk.NW,
+            font=("Arial", 8, "bold")
+        )
+        
         # Add resize handle at bottom-right corner
-        self.resize_handle = self.canvas.create_rectangle(
+        sel_data["handle"] = self.canvas.create_rectangle(
             x2 - self.handle_size, y2 - self.handle_size,
             x2 + self.handle_size, y2 + self.handle_size,
-            fill="red", outline="white"
+            fill=sel_data["color"], outline="white"
         )
     
-    def clear_selection(self):
-        self.selection_active = False
-        self.resize_active = False
-        if self.selection_rect:
-            self.canvas.delete(self.selection_rect)
-            self.selection_rect = None
-        if self.resize_handle:
-            self.canvas.delete(self.resize_handle)
-            self.resize_handle = None
+    def clear_selection(self, selection_type):
+        sel_data = self.selection_areas[selection_type]
+        sel_data["active"] = False
+        if sel_data["rect"]:
+            self.canvas.delete(sel_data["rect"])
+            sel_data["rect"] = None
+        if sel_data["handle"]:
+            self.canvas.delete(sel_data["handle"])
+            sel_data["handle"] = None
     
-    def extract_from_selection(self):
-        if not self.cap or not self.selection_active or not self.current_frame_image is not None:
-            if not self.selection_active:
-                self.status_bar.config(text="Please create a selection rectangle first")
-            return
+    def clear_all_selections(self):
+        for sel_type in self.selection_areas:
+            self.clear_selection(sel_type)
+    
+    def extract_from_selection(self, selection_type):
+        """Extract text from a specific selection area"""
+        if not self.cap or not self.current_frame_image is not None:
+            return None, None
             
-        # Get the current frame position
-        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
-        
+        sel_data = self.selection_areas[selection_type]
+        if not sel_data["active"]:
+            return None, None
+            
         # Get selection coordinates
-        x1 = min(self.start_x, self.current_x)
-        y1 = min(self.start_y, self.current_y)
-        x2 = max(self.start_x, self.current_x)
-        y2 = max(self.start_y, self.current_y)
+        x1 = min(sel_data["start_x"], sel_data["current_x"])
+        y1 = min(sel_data["start_y"], sel_data["current_y"])
+        x2 = max(sel_data["start_x"], sel_data["current_x"])
+        y2 = max(sel_data["start_y"], sel_data["current_y"])
         
         # Convert to original image coordinates
         orig_x1 = int(x1 * self.scale_factor_x)
@@ -489,71 +581,104 @@ class VideoTextPlayer:
         cropped_frame = self.current_frame_image[orig_y1:orig_y2, orig_x1:orig_x2]
         
         if cropped_frame.size == 0:
-            self.status_bar.config(text="Selection area is too small or invalid")
-            return
+            return None, None
             
         # Save the cropped frame
-        frame_filename = os.path.join(self.extracted_frames_dir, f"frame_{int(current_pos):06d}_cropped.jpg")
+        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+        frame_filename = os.path.join(
+            self.extracted_frames_dir, 
+            f"frame_{int(current_pos):06d}_{sel_data['label'].lower()}.jpg"
+        )
         cv2.imwrite(frame_filename, cropped_frame)
         
         # Process the cropped frame with OCR
         try:
-            # Extract text data with positions
-            data = pytesseract.image_to_data(cropped_frame, output_type=pytesseract.Output.DICT)
+            # Extract text data
+            text = pytesseract.image_to_string(cropped_frame).strip()
             
-            # Clear previous text
-            self.text_display.delete(1.0, tk.END)
-            
-            # Get timestamp
-            timestamp = timedelta(seconds=current_pos/self.fps)
-            
-            # Create header for results
-            self.text_display.insert(tk.END, f"Selected Region from Frame {int(current_pos)} (Time: {timestamp})\n")
-            self.text_display.insert(tk.END, f"Region: ({orig_x1}, {orig_y1}) to ({orig_x2}, {orig_y2})\n\n")
-            
-            # Track if any text was found
-            text_found = False
-            
-            # Process all text found
-            for i in range(len(data['text'])):
-                # Skip empty text
-                if not data['text'][i].strip():
-                    continue
-                
-                text_found = True
-                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
-                conf = data['conf'][i]
-                text = data['text'][i]
-                
-                # Add text with position to display
-                self.text_display.insert(tk.END, f"Text: '{text}' (Confidence: {conf}%)\n")
-                self.text_display.insert(tk.END, f"Position: x={x}, y={y}, width={w}, height={h}\n\n")
-                
-                # Draw rectangle on the cropped frame copy to show text location
-                cv2.rectangle(cropped_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            
-            if not text_found:
-                self.text_display.insert(tk.END, "No text detected in the selected region.\n")
-            
-            # Save the annotated cropped frame
-            annotated_filename = os.path.join(self.extracted_frames_dir, f"frame_{int(current_pos):06d}_cropped_annotated.jpg")
-            cv2.imwrite(annotated_filename, cropped_frame)
-            
-            # Display the annotated frame with selection rectangle
+            # Draw rectangle on the frame to show the selection
             display_frame = self.current_frame_image.copy()
-            cv2.rectangle(display_frame, (orig_x1, orig_y1), (orig_x2, orig_y2), (0, 0, 255), 2)
-            self.display_frame(display_frame)
+            cv2.rectangle(
+                display_frame, 
+                (orig_x1, orig_y1), 
+                (orig_x2, orig_y2), 
+                (0, 0, 255) if selection_type == self.SelectionType.CREDITS else
+                (0, 255, 0) if selection_type == self.SelectionType.WIN else
+                (255, 0, 0),  # BET
+                2
+            )
             
-            # Update status
-            self.status_bar.config(text=f"Text extracted from selected region. Cropped frame saved as {frame_filename}")
+            return text, frame_filename
             
         except Exception as e:
-            self.status_bar.config(text=f"Error extracting text from selection: {str(e)}")
-            self.text_display.delete(1.0, tk.END)
-            self.text_display.insert(tk.END, f"Error extracting text: {str(e)}")
+            print(f"Error extracting text from {sel_data['label']}: {str(e)}")
+            return None, None
+    
+    def extract_all_selections(self):
+        """Extract text from all selection areas and save to CSV"""
+        if not self.cap or self.current_frame_image is None:
+            self.status_bar.config(text="No video loaded or no frame available")
+            return
+            
+        # Check if any selections are active
+        active_selections = [sel_type for sel_type, sel_data in self.selection_areas.items() if sel_data["active"]]
+        if not active_selections:
+            self.status_bar.config(text="Please create at least one selection rectangle first")
+            return
+            
+        # Get the current frame position and timestamp
+        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+        timestamp = timedelta(seconds=current_pos/self.fps)
+        
+        # Clear previous text
+        self.text_display.delete(1.0, tk.END)
+        self.text_display.insert(tk.END, f"Frame {int(current_pos)} (Time: {timestamp})\n\n")
+        
+        # Extract text from each active selection
+        results = {}
+        display_frame = self.current_frame_image.copy()
+        
+        for sel_type in self.selection_areas:
+            text, filename = self.extract_from_selection(sel_type)
+            if text is not None:
+                results[sel_type] = text
+                self.text_display.insert(tk.END, f"{self.selection_areas[sel_type]['label']}: {text}\n\n")
+        
+        # Save results to CSV
+        self.save_to_csv(current_pos, timestamp, results)
+        
+        # Display the annotated frame
+        self.display_frame(display_frame)
+        
+        # Update status
+        self.status_bar.config(text=f"Text extracted from all selections and saved to CSV")
         
         # Reset position to maintain continuity
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
+    
+    def save_to_csv(self, frame_number, timestamp, results):
+        """Save the extracted text to a CSV file"""
+        # Prepare the data row
+        row = {
+            'Frame': int(frame_number),
+            'Timestamp': str(timestamp),
+            'Credits': results.get(self.SelectionType.CREDITS, ''),
+            'Win': results.get(self.SelectionType.WIN, ''),
+            'Bet': results.get(self.SelectionType.BET, '')
+        }
+        
+        # Check if file exists to determine if we need to write the header
+        file_exists = os.path.isfile(self.csv_file)
+        
+        # Write to CSV
+        with open(self.csv_file, 'a', newline='') as csvfile:
+            fieldnames = ['Frame', 'Timestamp', 'Credits', 'Win', 'Bet']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            if not file_exists:
+                writer.writeheader()
+                
+            writer.writerow(row)
 
 if __name__ == "__main__":
     root = tk.Tk()
