@@ -78,6 +78,10 @@ class VideoTextPlayer:
             "Bet": "N/A"
         }
         
+        # Thread synchronization
+        self.video_lock = threading.RLock()  # Reentrant lock for video access
+        self.frame_buffer = None  # Store the latest frame for processing
+        
         # Create UI components
         self.create_widgets()
         
@@ -294,6 +298,8 @@ class VideoTextPlayer:
             current_pos = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
             if current_pos >= self.last_processed_frame + self.process_interval:
                 self.last_processed_frame = current_pos
+                # Store the current frame for processing
+                self.frame_buffer = frame.copy()
                 # Add to processing queue instead of processing immediately
                 self.processing_queue.put(current_pos)
     
@@ -320,25 +326,26 @@ class VideoTextPlayer:
     def play_video(self):
         # Main playback loop
         while self.playing and not self.stop_playback:
-            # Get the next frame
-            ret, frame = self.cap.read()
-            
-            if not ret:
-                # End of video
-                self.playing = False
-                self.play_pause_btn.config(text="Play")
-                # Reset to beginning
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                self.current_frame = 0
-                # Update UI
-                self.root.after(0, self.update_time_label)
-                break
-            
-            # Update current frame
-            self.current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+            # Get the next frame with lock to prevent concurrent access
+            with self.video_lock:
+                ret, frame = self.cap.read()
+                
+                if not ret:
+                    # End of video
+                    self.playing = False
+                    self.play_pause_btn.config(text="Play")
+                    # Reset to beginning
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    self.current_frame = 0
+                    # Update UI
+                    self.root.after(0, self.update_time_label)
+                    break
+                
+                # Update current frame
+                self.current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
             
             # Display the frame
-            self.root.after(0, lambda f=frame: self.display_frame(f))
+            self.root.after(0, lambda f=frame.copy(): self.display_frame(f))
             
             # Update progress and time
             self.root.after(0, self.update_time_label)
@@ -373,18 +380,24 @@ class VideoTextPlayer:
         value = float(value)
         target_frame = int((value / 100) * self.total_frames)
         
-        # Seek to the frame
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-        
-        # Update current frame
-        self.current_frame = target_frame
-        
-        # Display the frame
-        ret, frame = self.cap.read()
-        if ret:
-            self.display_frame(frame)
-            # Step back to keep position correct
+        # Use lock when accessing the video file
+        with self.video_lock:
+            # Seek to the frame
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            
+            # Update current frame
+            self.current_frame = target_frame
+            
+            # Display the frame
+            ret, frame = self.cap.read()
+            if ret:
+                frame_copy = frame.copy()  # Make a copy to avoid threading issues
+                # Step back to keep position correct
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+        
+        # Display the frame (outside the lock)
+        if ret:
+            self.display_frame(frame_copy)
         
         # Update time label
         self.update_time_label()
@@ -393,14 +406,18 @@ class VideoTextPlayer:
         if not self.cap:
             return
         
-        # Get the current frame
-        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos - 1)  # Adjust for already moved position
-        ret, frame = self.cap.read()
-        
-        if not ret:
-            self.status_bar.config(text="Error: Could not read current frame")
-            return
+        # Get the current frame with lock
+        with self.video_lock:
+            current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos - 1)  # Adjust for already moved position
+            ret, frame = self.cap.read()
+            
+            if not ret:
+                self.status_bar.config(text="Error: Could not read current frame")
+                return
+                
+            # Make a copy of the frame to avoid threading issues
+            frame = frame.copy()
         
         # Save the frame
         frame_filename = os.path.join(self.extracted_frames_dir, f"frame_{int(current_pos):06d}.jpg")
@@ -787,21 +804,11 @@ class VideoTextPlayer:
     
     def process_frame_in_background(self, frame_number):
         """Process a frame in the background thread"""
-        if not self.cap:
+        if not self.cap or self.frame_buffer is None:
             return
             
-        # Store current position
-        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
-        
-        # Set position to the frame we want to process
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number - 1)
-        
-        # Read the frame
-        ret, frame = self.cap.read()
-        if not ret:
-            # Reset position and return
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
-            return
+        # Use the buffered frame instead of accessing the video file
+        frame = self.frame_buffer.copy()
             
         # Get timestamp
         timestamp = timedelta(seconds=frame_number/self.fps)
@@ -850,9 +857,6 @@ class VideoTextPlayer:
         if results:
             # Use the main thread to update UI and save to CSV
             self.root.after(0, lambda: self.save_to_csv(frame_number, timestamp, results))
-        
-        # Reset position
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
 
 if __name__ == "__main__":
     root = tk.Tk()
