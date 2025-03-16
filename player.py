@@ -10,6 +10,7 @@ import threading
 import time
 import csv
 from enum import Enum, auto
+import queue
 
 class VideoTextPlayer:
     def __init__(self, root):
@@ -66,6 +67,17 @@ class VideoTextPlayer:
         self.csv_file = "extracted_data.csv"
         self.csv_header_written = False
         
+        # Auto-processing settings
+        self.auto_process = False
+        self.process_interval = 15  # Process every 15 frames
+        self.last_processed_frame = -self.process_interval  # Start immediately
+        self.processing_queue = queue.Queue()
+        self.current_values = {
+            "Credits": "N/A",
+            "Win": "N/A",
+            "Bet": "N/A"
+        }
+        
         # Create UI components
         self.create_widgets()
         
@@ -89,6 +101,23 @@ class VideoTextPlayer:
         # Canvas for video display
         self.canvas = tk.Canvas(self.video_frame, bg="black", width=800, height=450)
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        
+        # Current values display
+        values_frame = tk.Frame(self.video_frame, bg="#333333", height=40)
+        values_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        # Labels for current values
+        self.credits_label = tk.Label(values_frame, text="Credits: N/A", 
+                                     bg="#333333", fg="white", font=("Arial", 10, "bold"))
+        self.credits_label.pack(side=tk.LEFT, padx=10)
+        
+        self.win_label = tk.Label(values_frame, text="Win: N/A", 
+                                 bg="#333333", fg="white", font=("Arial", 10, "bold"))
+        self.win_label.pack(side=tk.LEFT, padx=10)
+        
+        self.bet_label = tk.Label(values_frame, text="Bet: N/A", 
+                                 bg="#333333", fg="white", font=("Arial", 10, "bold"))
+        self.bet_label.pack(side=tk.LEFT, padx=10)
         
         # Bind mouse events for selection rectangle
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
@@ -141,6 +170,11 @@ class VideoTextPlayer:
         self.extract_all_btn = ttk.Button(control_frame, text="Extract All & Save to CSV", 
                                          command=self.extract_all_selections, state=tk.DISABLED)
         self.extract_all_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Auto-process toggle button
+        self.auto_process_btn = ttk.Button(control_frame, text="Start Auto Processing", 
+                                          command=self.toggle_auto_process, state=tk.DISABLED)
+        self.auto_process_btn.pack(side=tk.LEFT, padx=5)
         
         # Clear all selections button
         self.clear_all_btn = ttk.Button(control_frame, text="Clear All Selections", 
@@ -208,7 +242,13 @@ class VideoTextPlayer:
             self.extract_btn.config(state=tk.NORMAL)
             self.extract_all_btn.config(state=tk.NORMAL)
             self.clear_all_btn.config(state=tk.NORMAL)
+            self.auto_process_btn.config(state=tk.NORMAL)
             self.update_selection_type()
+            
+            # Start background processing thread
+            self.processing_thread = threading.Thread(target=self.process_queue)
+            self.processing_thread.daemon = True
+            self.processing_thread.start()
             
             # Update status
             video_name = os.path.basename(file_path)
@@ -248,6 +288,14 @@ class VideoTextPlayer:
         for sel_type, sel_data in self.selection_areas.items():
             if sel_data["active"]:
                 self.draw_selection_rectangle(sel_type)
+        
+        # Check if we should auto-process this frame
+        if self.auto_process and self.playing:
+            current_pos = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+            if current_pos >= self.last_processed_frame + self.process_interval:
+                self.last_processed_frame = current_pos
+                # Add to processing queue instead of processing immediately
+                self.processing_queue.put(current_pos)
     
     def toggle_play_pause(self):
         if not self.cap:
@@ -667,6 +715,9 @@ class VideoTextPlayer:
             'Bet': results.get(self.SelectionType.BET, '')
         }
         
+        # Update current values display
+        self.update_current_values(results)
+        
         # Check if file exists to determine if we need to write the header
         file_exists = os.path.isfile(self.csv_file)
         
@@ -679,6 +730,129 @@ class VideoTextPlayer:
                 writer.writeheader()
                 
             writer.writerow(row)
+    
+    def update_current_values(self, results):
+        """Update the current values display"""
+        if self.SelectionType.CREDITS in results:
+            self.current_values["Credits"] = results[self.SelectionType.CREDITS]
+            self.credits_label.config(text=f"Credits: {self.current_values['Credits']}")
+            
+        if self.SelectionType.WIN in results:
+            self.current_values["Win"] = results[self.SelectionType.WIN]
+            self.win_label.config(text=f"Win: {self.current_values['Win']}")
+            
+        if self.SelectionType.BET in results:
+            self.current_values["Bet"] = results[self.SelectionType.BET]
+            self.bet_label.config(text=f"Bet: {self.current_values['Bet']}")
+    
+    def toggle_auto_process(self):
+        """Toggle automatic processing of frames"""
+        if not self.cap:
+            return
+            
+        # Check if any selections are active
+        active_selections = [sel_type for sel_type, sel_data in self.selection_areas.items() if sel_data["active"]]
+        if not active_selections:
+            self.status_bar.config(text="Please create at least one selection rectangle first")
+            return
+            
+        self.auto_process = not self.auto_process
+        
+        if self.auto_process:
+            self.auto_process_btn.config(text="Stop Auto Processing")
+            self.status_bar.config(text=f"Auto processing enabled - processing every {self.process_interval} frames")
+        else:
+            self.auto_process_btn.config(text="Start Auto Processing")
+            self.status_bar.config(text="Auto processing disabled")
+    
+    def process_queue(self):
+        """Background thread to process frames from the queue"""
+        while True:
+            try:
+                # Get frame number from queue with a timeout
+                frame_number = self.processing_queue.get(timeout=0.5)
+                
+                # Process the frame
+                self.process_frame_in_background(frame_number)
+                
+                # Mark task as done
+                self.processing_queue.task_done()
+                
+            except queue.Empty:
+                # No frames to process, just continue waiting
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"Error in processing thread: {str(e)}")
+                time.sleep(1)  # Avoid tight loop in case of persistent errors
+    
+    def process_frame_in_background(self, frame_number):
+        """Process a frame in the background thread"""
+        if not self.cap:
+            return
+            
+        # Store current position
+        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+        
+        # Set position to the frame we want to process
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number - 1)
+        
+        # Read the frame
+        ret, frame = self.cap.read()
+        if not ret:
+            # Reset position and return
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
+            return
+            
+        # Get timestamp
+        timestamp = timedelta(seconds=frame_number/self.fps)
+        
+        # Extract text from each active selection
+        results = {}
+        
+        for sel_type, sel_data in self.selection_areas.items():
+            if not sel_data["active"]:
+                continue
+                
+            # Get selection coordinates
+            x1 = min(sel_data["start_x"], sel_data["current_x"])
+            y1 = min(sel_data["start_y"], sel_data["current_y"])
+            x2 = max(sel_data["start_x"], sel_data["current_x"])
+            y2 = max(sel_data["start_y"], sel_data["current_y"])
+            
+            # Convert to original image coordinates
+            orig_x1 = int(x1 * self.scale_factor_x)
+            orig_y1 = int(y1 * self.scale_factor_y)
+            orig_x2 = int(x2 * self.scale_factor_x)
+            orig_y2 = int(y2 * self.scale_factor_y)
+            
+            # Ensure coordinates are within image bounds
+            frame_h, frame_w = frame.shape[:2]
+            orig_x1 = max(0, min(orig_x1, frame_w))
+            orig_y1 = max(0, min(orig_y1, frame_h))
+            orig_x2 = max(0, min(orig_x2, frame_w))
+            orig_y2 = max(0, min(orig_y2, frame_h))
+            
+            # Crop the image
+            cropped_frame = frame[orig_y1:orig_y2, orig_x1:orig_x2]
+            
+            if cropped_frame.size == 0:
+                continue
+                
+            try:
+                # Extract text data
+                text = pytesseract.image_to_string(cropped_frame).strip()
+                if text:
+                    results[sel_type] = text
+            except Exception as e:
+                print(f"Error extracting text from {sel_data['label']}: {str(e)}")
+        
+        # Save results to CSV if we found any text
+        if results:
+            # Use the main thread to update UI and save to CSV
+            self.root.after(0, lambda: self.save_to_csv(frame_number, timestamp, results))
+        
+        # Reset position
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
 
 if __name__ == "__main__":
     root = tk.Tk()
