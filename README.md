@@ -1,7 +1,7 @@
 # Overview
 This repository is a workflow for downloading and parsing content from youtube videos.
 
-![VideoConsole](./demo.gif)
+![VideoConsole](./demo.png)
 
 # Workflow
 This is currently a generic workflow that's manaully executed
