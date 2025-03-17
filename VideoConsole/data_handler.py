@@ -90,7 +90,6 @@ class DataHandler:
         
         # Calculate expected credit change
         expected_decrease = previous_bet
-        expected_increase = previous_win
         
         # Calculate actual change
         actual_change = current_credits - previous_credits
