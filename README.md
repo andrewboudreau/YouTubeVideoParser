@@ -13,10 +13,8 @@ This is currently a generic workflow that's manaully executed
 ```
 pip install opencv-python pillow numpy matplotlib
 ```
-
-## Tesseract
-Install tesseract on your windows machine using [Tesseract installer for Windows](https://github.com/UB-Mannheim/tesseract/wiki)
-`pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'`
+## OCR
+Using [TrOCR](https://huggingface.co/docs/transformers/model_doc/trocr)
 
 ## Python
 Not even sure, tbd did it a long time ago
