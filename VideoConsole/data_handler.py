@@ -29,12 +29,16 @@ class DataHandler:
             return False
             
         # Validate credit changes
-        valid_entry = True
         try:
             current_credits = float(results[selection_types.CREDITS])
             current_bet = float(results[selection_types.BET])
             current_win = float(results[selection_types.WIN])
-            
+        
+            # Update previous values after successful write
+            self.previous_credits = current_credits
+            self.previous_bet = current_bet
+            self.previous_win = current_win
+
             # Validate with previous values
             if not self.validate_credit_changes(current_credits, current_bet, current_win):
                 print(f"Credit validation failed for frame {frame_number} - not saving to CSV")
@@ -64,11 +68,6 @@ class DataHandler:
                 writer.writeheader()
                 
             writer.writerow(row)
-        
-        # Update previous values after successful write
-        self.previous_credits = current_credits
-        self.previous_bet = current_bet
-        self.previous_win = current_win
         
         return True
     
