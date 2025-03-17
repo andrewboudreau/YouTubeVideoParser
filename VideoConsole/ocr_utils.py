@@ -67,7 +67,7 @@ class OCRProcessor:
             value = float(result)
             # Cap minimum value at 0
             if value < 0:
-                value = 0
+                value = ""
             # Ignore values over 50000
             if value > 50000:
                 return ""
