@@ -10,6 +10,11 @@ class DataHandler:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.csv_file = f"extracted_data_{timestamp}.csv"
         self.csv_header_written = False
+        
+        # Store previous values as instance variables
+        self.previous_credits = None
+        self.previous_bet = None
+        self.previous_win = None
     
     def save_to_csv(self, frame_number, timestamp, results, selection_types):
         """Save the extracted text to a CSV file"""
@@ -60,39 +65,24 @@ class DataHandler:
                 
             writer.writerow(row)
         
+        # Update previous values after successful write
+        self.previous_credits = current_credits
+        self.previous_bet = current_bet
+        self.previous_win = current_win
+        
         return True
     
     def validate_credit_changes(self, current_credits, current_bet, current_win):
         """Validate that credit changes follow expected patterns"""
-        # Get previous values from CSV if it exists
-        previous_credits = None
-        previous_bet = None
-        previous_win = None
-        
-        if os.path.exists(self.csv_file):
-            try:
-                df = pd.read_csv(self.csv_file)
-                if not df.empty:
-                    last_row = df.iloc[-1]
-                    if 'Credits' in last_row and not pd.isna(last_row['Credits']):
-                        previous_credits = float(last_row['Credits'])
-                    if 'Bet' in last_row and not pd.isna(last_row['Bet']):
-                        previous_bet = float(last_row['Bet'])
-                    if 'Win' in last_row and not pd.isna(last_row['Win']):
-                        previous_win = float(last_row['Win'])
-            except Exception as e:
-                print(f"Error reading previous values: {e}")
-                return True  # If we can't validate, assume it's valid
-        
         # If we don't have previous values, we can't validate
-        if previous_credits is None or previous_bet is None or previous_win is None:
+        if self.previous_credits is None or self.previous_bet is None or self.previous_win is None:
             return True
         
         # Calculate expected credit change
-        expected_decrease = previous_bet
+        expected_decrease = self.previous_bet
         
         # Calculate actual change
-        actual_change = current_credits - previous_credits
+        actual_change = current_credits - self.previous_credits
         
         # If credits decreased by more than the previous bet, it's likely an error
         if actual_change < 0 and abs(actual_change) > expected_decrease * 1.1:  # Allow 10% margin for rounding
