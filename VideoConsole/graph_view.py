@@ -45,16 +45,13 @@ class GraphView:
             return "No data to graph yet."
             
         try:
-            # Clear the plot
-            self.plot.clear()
+            # Completely clear the figure and recreate the subplot
+            self.fig.clear()
+            self.plot = self.fig.add_subplot(111)
             
             # Create a second y-axis for Bet and Win
             ax1 = self.plot
             ax2 = ax1.twinx()
-            
-            # Make sure we're starting with a clean slate for both axes
-            ax1.cla()
-            ax2.cla()
             
             # Plot Credits on the left y-axis
             if not data_df['Credits'].isna().all():
