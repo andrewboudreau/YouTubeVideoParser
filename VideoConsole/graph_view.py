@@ -13,79 +13,96 @@ class GraphView:
         tk.Label(self.frame, text="Values Over Time:", bg="#f0f0f0", 
                 font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 5))
         
-        # Create matplotlib figure and canvas
-        self.fig = Figure(figsize=(5, 4), dpi=100)
-        self.plot = self.fig.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.frame)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        # Create two separate frames for the graphs
+        self.credits_frame = tk.Frame(self.frame, bg="#f0f0f0")
+        self.credits_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        # Initialize empty graph
+        self.bet_win_frame = tk.Frame(self.frame, bg="#f0f0f0")
+        self.bet_win_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Create matplotlib figures and canvases for both graphs
+        self.credits_fig = Figure(figsize=(5, 2), dpi=100)
+        self.credits_plot = self.credits_fig.add_subplot(111)
+        self.credits_canvas = FigureCanvasTkAgg(self.credits_fig, master=self.credits_frame)
+        self.credits_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        self.bet_win_fig = Figure(figsize=(5, 2), dpi=100)
+        self.bet_win_plot = self.bet_win_fig.add_subplot(111)
+        self.bet_win_canvas = FigureCanvasTkAgg(self.bet_win_fig, master=self.bet_win_frame)
+        self.bet_win_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Initialize empty graphs
         self.initialize_graph()
     
     def initialize_graph(self):
-        """Initialize an empty graph"""
-        self.plot.clear()
-        self.plot.set_xlabel('Frame')
-        self.plot.set_ylabel('Credits', color='r')
-        self.plot.tick_params(axis='y', labelcolor='r')
+        """Initialize empty graphs"""
+        # Credits graph
+        self.credits_plot.clear()
+        self.credits_plot.set_xlabel('Frame')
+        self.credits_plot.set_ylabel('Credits', color='r')
+        self.credits_plot.tick_params(axis='y', labelcolor='r')
+        self.credits_plot.set_title('Credits Over Time')
+        self.credits_plot.grid(True)
+        self.credits_fig.tight_layout()
         
-        # Create a second y-axis
-        ax2 = self.plot.twinx()
-        ax2.set_ylabel('Bet / Win', color='g')
-        ax2.tick_params(axis='y', labelcolor='g')
+        # Bet and Win graph
+        self.bet_win_plot.clear()
+        self.bet_win_plot.set_xlabel('Frame')
+        self.bet_win_plot.set_ylabel('Value')
+        self.bet_win_plot.set_title('Bet and Win Over Time')
+        self.bet_win_plot.grid(True)
+        self.bet_win_fig.tight_layout()
         
-        self.plot.set_title('Credits, Bet, and Win Over Time')
-        self.plot.grid(True)
-        self.fig.tight_layout()
-        self.canvas.draw()
+        # Draw both canvases
+        self.credits_canvas.draw()
+        self.bet_win_canvas.draw()
     
     def update_graph(self, data_df):
-        """Update the graph with data from the dataframe"""
+        """Update both graphs with data from the dataframe"""
         if data_df is None or len(data_df) == 0:
             return "No data to graph yet."
             
         try:
-            # Completely clear the figure and recreate the subplot
-            self.fig.clear()
-            self.plot = self.fig.add_subplot(111)
+            # Clear both plots
+            self.credits_plot.clear()
+            self.bet_win_plot.clear()
             
-            # Create a second y-axis for Bet and Win
-            ax1 = self.plot
-            ax2 = ax1.twinx()
-            
-            # Plot Credits on the left y-axis
+            # Plot Credits on the first graph
             if not data_df['Credits'].isna().all():
-                ax1.plot(data_df['Frame'], data_df['Credits'], 'r-', label='Credits')
-                ax1.set_ylabel('Credits', color='r')
-                ax1.tick_params(axis='y', labelcolor='r')
+                self.credits_plot.plot(data_df['Frame'], data_df['Credits'], 'r-', label='Credits')
+                self.credits_plot.set_xlabel('Frame')
+                self.credits_plot.set_ylabel('Credits', color='r')
+                self.credits_plot.set_title('Credits Over Time')
+                self.credits_plot.grid(True)
+                self.credits_plot.legend(loc='upper left')
             
-            # Plot Bet and Win on the right y-axis
+            # Plot Bet and Win on the second graph
+            has_bet_or_win = False
+            
             if not data_df['Bet'].isna().all():
-                ax2.plot(data_df['Frame'], data_df['Bet'], 'b-', label='Bet')
+                self.bet_win_plot.plot(data_df['Frame'], data_df['Bet'], 'b-', label='Bet')
+                has_bet_or_win = True
+                
             if not data_df['Win'].isna().all():
-                ax2.plot(data_df['Frame'], data_df['Win'], 'g-', label='Win')
+                self.bet_win_plot.plot(data_df['Frame'], data_df['Win'], 'g-', label='Win')
+                has_bet_or_win = True
             
-            if not data_df['Bet'].isna().all() or not data_df['Win'].isna().all():
-                ax2.set_ylabel('Bet / Win', color='g')
-                ax2.tick_params(axis='y', labelcolor='g')
+            if has_bet_or_win:
+                self.bet_win_plot.set_xlabel('Frame')
+                self.bet_win_plot.set_ylabel('Value')
+                self.bet_win_plot.set_title('Bet and Win Over Time')
+                self.bet_win_plot.grid(True)
+                self.bet_win_plot.legend(loc='upper left')
             
-            # Add labels and title
-            ax1.set_xlabel('Frame')
-            ax1.set_title('Credits, Bet, and Win Over Time')
-            ax1.grid(True)
+            # Adjust layout and redraw both canvases
+            self.credits_fig.tight_layout()
+            self.bet_win_fig.tight_layout()
+            self.credits_canvas.draw()
+            self.bet_win_canvas.draw()
             
-            # Create a combined legend
-            lines1, labels1 = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-            
-            # Adjust layout and redraw
-            self.fig.tight_layout()
-            self.canvas.draw()
-            
-            return f"Graph updated with {len(data_df)} data points."
+            return f"Graphs updated with {len(data_df)} data points."
             
         except Exception as e:
-            error_msg = f"Error updating graph: {str(e)}"
+            error_msg = f"Error updating graphs: {str(e)}"
             print(error_msg)
             return error_msg
