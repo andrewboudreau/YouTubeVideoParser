@@ -1,7 +1,8 @@
 # Overview
 This repository is a workflow for downloading and parsing content from youtube videos.
 
-[!demo](demo.png)
+![VideoConsole](demo.gif)
+
 # Workflow
 This is currently a generic workflow that's manaully executed
  - Download the video using download_youtube_video.py
