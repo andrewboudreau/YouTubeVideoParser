@@ -134,6 +134,12 @@ class VideoTextPlayer:
         self.video_canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.video_canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
         
+        # Bind keyboard events for nudging selection rectangles
+        self.root.bind("<Left>", lambda e: self.nudge_selection("left"))
+        self.root.bind("<Right>", lambda e: self.nudge_selection("right"))
+        self.root.bind("<Up>", lambda e: self.nudge_selection("up"))
+        self.root.bind("<Down>", lambda e: self.nudge_selection("down"))
+        
         # Right panel containing text display and graph
         right_panel = tk.Frame(top_frame, bg="#f0f0f0", width=400)
         right_panel.pack(side=tk.RIGHT, padx=5, pady=5, fill=tk.BOTH, expand=True)
@@ -924,6 +930,49 @@ class VideoTextPlayer:
         # Auto-update the graph if we have new data
         if self.auto_process and any(key in results for key in [self.SelectionType.CREDITS, self.SelectionType.BET, self.SelectionType.WIN]):
             self.root.after(1000, self.update_graph)  # Update graph after a delay to avoid too frequent updates
+    
+    def nudge_selection(self, direction):
+        """Nudge the current selection in the specified direction by 5 pixels"""
+        if not self.current_selection_type:
+            return
+            
+        sel_data = self.selection_areas[self.current_selection_type]
+        if not sel_data["active"]:
+            self.status_bar.config(text=f"No active {sel_data['label']} selection to nudge")
+            return
+            
+        # Amount to nudge in pixels
+        nudge_amount = 5
+        
+        # Update coordinates based on direction
+        if direction == "left":
+            sel_data["start_x"] -= nudge_amount
+            sel_data["current_x"] -= nudge_amount
+            self.status_bar.config(text=f"Nudged {sel_data['label']} selection left by {nudge_amount} pixels")
+        elif direction == "right":
+            sel_data["start_x"] += nudge_amount
+            sel_data["current_x"] += nudge_amount
+            self.status_bar.config(text=f"Nudged {sel_data['label']} selection right by {nudge_amount} pixels")
+        elif direction == "up":
+            sel_data["start_y"] -= nudge_amount
+            sel_data["current_y"] -= nudge_amount
+            self.status_bar.config(text=f"Nudged {sel_data['label']} selection up by {nudge_amount} pixels")
+        elif direction == "down":
+            sel_data["start_y"] += nudge_amount
+            sel_data["current_y"] += nudge_amount
+            self.status_bar.config(text=f"Nudged {sel_data['label']} selection down by {nudge_amount} pixels")
+        
+        # Ensure coordinates stay within canvas bounds
+        canvas_width = self.video_canvas.winfo_width()
+        canvas_height = self.video_canvas.winfo_height()
+        
+        sel_data["start_x"] = max(0, min(sel_data["start_x"], canvas_width))
+        sel_data["start_y"] = max(0, min(sel_data["start_y"], canvas_height))
+        sel_data["current_x"] = max(0, min(sel_data["current_x"], canvas_width))
+        sel_data["current_y"] = max(0, min(sel_data["current_y"], canvas_height))
+        
+        # Redraw the selection rectangle
+        self.draw_selection_rectangle(self.current_selection_type)
     
     def toggle_auto_process(self):
         """Toggle automatic processing of frames"""
