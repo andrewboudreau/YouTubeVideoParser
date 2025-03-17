@@ -769,9 +769,12 @@ class VideoTextPlayer:
         except Exception as e:
             print(f"Error validating credit changes: {e}")
         
-        # Skip if the entry is invalid
+        # Update current values display regardless of validation
+        self.update_current_values(results)
+        
+        # Skip saving to CSV if the entry is invalid
         if not valid_entry:
-            print(f"Skipping invalid entry at frame {frame_number}")
+            print(f"Skipping invalid entry at frame {frame_number} - not saving to CSV")
             return
         
         # Additional validation using our dedicated function
@@ -781,7 +784,8 @@ class VideoTextPlayer:
             current_win = float(results[self.SelectionType.WIN])
             
             if not self.validate_credit_changes(current_credits, current_bet, current_win):
-                print(f"Credit validation failed for frame {frame_number}")
+                print(f"Credit validation failed for frame {frame_number} - not saving to CSV")
+                # Still update the display even though we're not saving to CSV
                 return
         except Exception as e:
             print(f"Error in additional validation: {e}")
@@ -795,8 +799,7 @@ class VideoTextPlayer:
             'Win': results.get(self.SelectionType.WIN, '')
         }
         
-        # Update current values display
-        self.update_current_values(results)
+        # Current values display was already updated above
         
         # Check if file exists to determine if we need to write the header
         file_exists = os.path.isfile(self.csv_file)
