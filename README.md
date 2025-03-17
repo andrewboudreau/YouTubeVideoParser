@@ -9,7 +9,7 @@ This is currently a generic workflow that's manaully executed
 # Requirements
 ## tldr;
 ```
-pip install opencv-python pytesseract pillow numpy
+pip install opencv-python pillow numpy matplotlib
 ```
 
 ## Tesseract
@@ -23,7 +23,6 @@ Not even sure, tbd did it a long time ago
 You'll need to install a few python packages using pip. You can do this by running the following command in your terminal:
 ```bash
 pip install yt-dlp
-pip install pytesseract
 ```
 
 
