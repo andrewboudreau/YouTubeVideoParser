@@ -52,6 +52,10 @@ class GraphView:
             ax1 = self.plot
             ax2 = ax1.twinx()
             
+            # Make sure we're starting with a clean slate for both axes
+            ax1.cla()
+            ax2.cla()
+            
             # Plot Credits on the left y-axis
             if not data_df['Credits'].isna().all():
                 ax1.plot(data_df['Frame'], data_df['Credits'], 'r-', label='Credits')
