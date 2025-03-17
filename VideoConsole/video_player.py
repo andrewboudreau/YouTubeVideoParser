@@ -34,6 +34,7 @@ class VideoTextPlayer:
         self.current_frame = 0
         self.duration = 0
         self.playing = False
+        self.playback_speed = 1.0  # Default playback speed multiplier
         self.extracted_frames_dir = "extracted_frames"
         os.makedirs(self.extracted_frames_dir, exist_ok=True)
         
@@ -175,6 +176,17 @@ class VideoTextPlayer:
         self.auto_process_btn = ttk.Button(control_frame, text="Start Auto Processing", 
                                           command=self.toggle_auto_process, state=tk.DISABLED)
         self.auto_process_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Playback speed control
+        speed_frame = tk.Frame(control_frame, bg="#f0f0f0")
+        speed_frame.pack(side=tk.LEFT, padx=5)
+        
+        tk.Label(speed_frame, text="Speed:", bg="#f0f0f0").pack(side=tk.LEFT)
+        self.speed_var = tk.StringVar(value="1x")
+        self.speed_combo = ttk.Combobox(speed_frame, textvariable=self.speed_var, 
+                                       values=["1x", "2x", "4x", "8x"], width=3, state="readonly")
+        self.speed_combo.pack(side=tk.LEFT)
+        self.speed_combo.bind("<<ComboboxSelected>>", self.update_playback_speed)
         
         # Update graph button
         self.update_graph_btn = ttk.Button(control_frame, text="Update Graph", 
@@ -346,8 +358,8 @@ class VideoTextPlayer:
             # Update progress and time
             self.root.after(0, self.update_time_label)
             
-            # Control playback speed
-            time.sleep(1 / self.fps)
+            # Control playback speed - adjust sleep time based on playback speed
+            time.sleep(1 / (self.fps * self.playback_speed))
     
     def update_time_label(self):
         if not self.cap:
@@ -608,6 +620,13 @@ class VideoTextPlayer:
         data_df = self.data_handler.get_data_for_graph()
         status_msg = self.graph_view.update_graph(data_df)
         self.status_bar.config(text=status_msg)
+    
+    def update_playback_speed(self, event=None):
+        """Update the playback speed based on the selected value"""
+        speed_str = self.speed_var.get()
+        # Convert "2x" to 2.0, etc.
+        self.playback_speed = float(speed_str.replace('x', ''))
+        self.status_bar.config(text=f"Playback speed set to {speed_str}")
     
     def process_queue(self):
         """Background thread to process frames from the queue"""
