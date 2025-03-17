@@ -822,7 +822,14 @@ class VideoTextPlayer:
         """Initialize an empty graph"""
         self.plot.clear()
         self.plot.set_xlabel('Frame')
-        self.plot.set_ylabel('Value')
+        self.plot.set_ylabel('Credits', color='r')
+        self.plot.tick_params(axis='y', labelcolor='r')
+        
+        # Create a second y-axis
+        ax2 = self.plot.twinx()
+        ax2.set_ylabel('Bet / Win', color='g')
+        ax2.tick_params(axis='y', labelcolor='g')
+        
         self.plot.set_title('Credits, Bet, and Win Over Time')
         self.plot.grid(True)
         self.fig.tight_layout()
@@ -849,20 +856,35 @@ class VideoTextPlayer:
             # Clear the plot
             self.plot.clear()
             
-            # Plot each series
-            if not df['Credits'].isna().all():
-                self.plot.plot(df['Frame'], df['Credits'], 'r-', label='Credits')
-            if not df['Bet'].isna().all():
-                self.plot.plot(df['Frame'], df['Bet'], 'b-', label='Bet')
-            if not df['Win'].isna().all():
-                self.plot.plot(df['Frame'], df['Win'], 'g-', label='Win')
+            # Create a second y-axis for Bet and Win
+            ax1 = self.plot
+            ax2 = ax1.twinx()
             
-            # Add labels and legend
-            self.plot.set_xlabel('Frame')
-            self.plot.set_ylabel('Value')
-            self.plot.set_title('Credits, Bet, and Win Over Time')
-            self.plot.grid(True)
-            self.plot.legend()
+            # Plot Credits on the left y-axis
+            if not df['Credits'].isna().all():
+                ax1.plot(df['Frame'], df['Credits'], 'r-', label='Credits')
+                ax1.set_ylabel('Credits', color='r')
+                ax1.tick_params(axis='y', labelcolor='r')
+            
+            # Plot Bet and Win on the right y-axis
+            if not df['Bet'].isna().all():
+                ax2.plot(df['Frame'], df['Bet'], 'b-', label='Bet')
+            if not df['Win'].isna().all():
+                ax2.plot(df['Frame'], df['Win'], 'g-', label='Win')
+            
+            if not df['Bet'].isna().all() or not df['Win'].isna().all():
+                ax2.set_ylabel('Bet / Win', color='g')
+                ax2.tick_params(axis='y', labelcolor='g')
+            
+            # Add labels and title
+            ax1.set_xlabel('Frame')
+            ax1.set_title('Credits, Bet, and Win Over Time')
+            ax1.grid(True)
+            
+            # Create a combined legend
+            lines1, labels1 = ax1.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
             
             # Adjust layout and redraw
             self.fig.tight_layout()
