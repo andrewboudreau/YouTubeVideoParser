@@ -43,7 +43,7 @@ class OCRProcessor:
                 
             # Process the image with TrOCR
             pixel_values = self.processor(pil_image, return_tensors="pt").pixel_values
-            generated_ids = self.model.generate(pixel_values)
+            generated_ids = self.model.generate(pixel_values, max_new_tokens=50)
             extracted_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
             
             return extracted_text.strip()
