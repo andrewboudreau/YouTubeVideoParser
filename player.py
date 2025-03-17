@@ -69,8 +69,9 @@ class VideoTextPlayer:
         self.scale_factor_x = 1.0
         self.scale_factor_y = 1.0
         
-        # CSV file for saving extracted data
-        self.csv_file = "extracted_data.csv"
+        # CSV file for saving extracted data with timestamp suffix
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        self.csv_file = f"extracted_data_{timestamp}.csv"
         self.csv_header_written = False
         
         # Auto-processing settings
